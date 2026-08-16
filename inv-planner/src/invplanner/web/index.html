@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refinery Inventory Planner</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"></span>
+    <div>
+      <h1>Inventory Planner</h1>
+      <p id="scenario-meta">loading…</p>
+    </div>
+  </div>
+  <div class="topbar-controls">
+    <div class="mode-switch" id="mode-switch">
+      <button data-mode="planning" class="active" title="Build and review a schedule by hand, the way the workbook does">Planning</button>
+      <button data-mode="optimizer" title="Generate a schedule automatically from the planning inputs">Optimizer</button>
+    </div>
+    <label class="field">
+      <span>Scenario</span>
+      <select id="scenario-select"></select>
+    </label>
+    <button id="new-scenario" class="btn ghost" title="Freeze current staging into a new scenario">New scenario</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="alerts" data-mode="planning" class="active">Capacity &amp; alerts</button>
+  <button data-view="dashboard" data-mode="planning">Dashboards</button>
+  <button data-view="stream" data-mode="planning">Stream sheet</button>
+  <button data-view="projection" data-mode="planning">Inventory projection</button>
+  <button data-view="schedule" data-mode="planning">Charge schedule</button>
+  <button data-view="feeds" data-mode="planning">Source data</button>
+  <button data-view="reference" data-mode="planning">Model inputs</button>
+  <button data-view="optparams" data-mode="optimizer">Optimizer inputs</button>
+  <button data-view="optruns" data-mode="optimizer">Runs &amp; results</button>
+</nav>
+
+<main id="main">
+  <!-- ALERTS -->
+  <section id="view-alerts" class="view active">
+    <div class="view-head">
+      <div>
+        <h2>Where the plan breaks</h2>
+        <p class="muted">Products that overflow their tanks, run dry, or leave their control band inside the window. Overflow is the signal that a downgrade is needed.</p>
+      </div>
+      <label class="field">
+        <span>Window</span>
+        <select id="alert-window">
+          <option value="10">10 days</option>
+          <option value="14">14 days</option>
+          <option value="30" selected>30 days</option>
+          <option value="90">90 days</option>
+          <option value="366">Full horizon</option>
+        </select>
+      </label>
+    </div>
+    <div id="alert-summary" class="stat-row"></div>
+    <div class="card"><div id="alerts-table" class="table-wrap"></div></div>
+  </section>
+
+  <!-- DASHBOARDS -->
+  <section id="view-dashboard" class="view">
+    <div class="view-head">
+      <div>
+        <h2 id="dash-title">Dashboards</h2>
+        <p class="muted" id="dash-blurb"></p>
+      </div>
+      <div class="controls">
+        <label class="field">
+          <span>Horizon</span>
+          <select id="dash-days">
+            <option value="90">3 months</option>
+            <option value="180" selected>6 months</option>
+            <option value="270">9 months</option>
+            <option value="366">Full year</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div id="dash-groups" class="group-tabs"></div>
+    <div id="dash-sections"></div>
+  </section>
+
+  <!-- STREAM SHEET -->
+  <section id="view-stream" class="view">
+    <div class="view-head">
+      <div>
+        <h2>Stream sheet</h2>
+        <p class="muted">Every product in a stream, with its full daily balance — beginning inventory, production in, sales, forecast, blends, charged out, ending inventory and headroom. The same layout as the workbook tab.</p>
+      </div>
+      <div class="controls">
+        <label class="field">
+          <span>Stream</span>
+          <select id="stream-select"></select>
+        </label>
+        <label class="field">
+          <span>Start</span>
+          <select id="stream-offset"></select>
+        </label>
+        <label class="field">
+          <span>Days</span>
+          <select id="stream-days">
+            <option value="14">14</option>
+            <option value="21" selected>21</option>
+            <option value="30">30</option>
+            <option value="60">60</option>
+          </select>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="stream-key-rows">
+          <span>Key rows only</span>
+        </label>
+      </div>
+    </div>
+    <div class="card"><div id="stream-grid" class="table-wrap tall"></div></div>
+  </section>
+
+  <!-- PROJECTION -->
+  <section id="view-projection" class="view">
+    <div class="view-head">
+      <div>
+        <h2>Inventory projection</h2>
+        <p class="muted">Daily balance for one product: begin, production in, demand out, charge out, ending inventory against tank capacity.</p>
+      </div>
+      <div class="controls">
+        <label class="field">
+          <span>Product</span>
+          <select id="product-select"></select>
+        </label>
+        <label class="field">
+          <span>Horizon</span>
+          <select id="proj-days">
+            <option value="30">30 days</option>
+            <option value="60">60 days</option>
+            <option value="120" selected>120 days</option>
+            <option value="366">Full year</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="card chart-card">
+      <div id="proj-legend" class="legend"></div>
+      <div id="proj-chart"></div>
+    </div>
+    <div class="card"><div id="proj-table" class="table-wrap tall"></div></div>
+  </section>
+
+  <!-- SCHEDULE -->
+  <section id="view-schedule" class="view">
+    <div class="view-head">
+      <div>
+        <h2>Charge schedule</h2>
+        <p class="muted">What each unit charges, in barrels per day. Edit a cell and the projection re-simulates immediately.</p>
+      </div>
+      <div class="controls">
+        <label class="field">
+          <span>From day</span>
+          <select id="sched-offset"></select>
+        </label>
+        <label class="field">
+          <span>Show</span>
+          <select id="sched-days">
+            <option value="14">14 days</option>
+            <option value="21" selected>21 days</option>
+            <option value="42">42 days</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="card">
+      <details class="collapsible">
+        <summary>
+          <span class="collapsible-mark" aria-hidden="true"></span>
+          <span>
+            <h3>Planned downtime</h3>
+            <p class="muted">Days a unit cannot produce. Set these before running the optimizer — outside them every unit is expected to run. Click any <b>Down</b> cell in the grid below to toggle a single day.</p>
+          </span>
+        </summary>
+        <div class="feed-detail-head">
+          <div class="controls">
+            <label class="field"><span>Unit</span><select id="dt-unit"></select></label>
+            <label class="field"><span>From</span><input id="dt-start" type="date"></label>
+            <label class="field"><span>To</span><input id="dt-end" type="date"></label>
+            <label class="field"><span>Reason</span><input id="dt-reason" type="text" placeholder="turnaround"></label>
+            <button id="dt-add" class="btn">Add</button>
+          </div>
+        </div>
+        <div id="downtime-list" class="table-wrap"></div>
+      </details>
+    </div>
+    <div class="card">
+      <div id="sched-compare" class="controls compare-bar"></div>
+      <div id="schedule-grid" class="table-wrap tall"></div>
+    </div>
+  </section>
+
+  <!-- FEEDS -->
+  <section id="view-feeds" class="view">
+    <div class="view-head">
+      <div>
+        <h2>Source data</h2>
+        <p class="muted">Each value keeps what the source sent and what a planner changed it to. Re-syncing updates the source side only — your edits are never overwritten, and drift is flagged.</p>
+      </div>
+      <button id="sync-all" class="btn">Re-sync all feeds</button>
+    </div>
+    <div id="feed-cards" class="feed-grid"></div>
+    <div class="card" id="feed-detail" hidden>
+      <div class="feed-detail-head">
+        <div>
+          <h3 id="feed-title"></h3>
+          <p class="muted" id="feed-sub"></p>
+        </div>
+        <div class="controls">
+          <input id="feed-search" type="search" placeholder="Search product…">
+          <select id="feed-filter">
+            <option value="all">All rows</option>
+            <option value="overrides">Overridden only</option>
+            <option value="stale">Stale overrides</option>
+          </select>
+          <button id="feed-sync" class="btn ghost">Sync this feed</button>
+        </div>
+      </div>
+      <div id="feed-table" class="table-wrap tall"></div>
+    </div>
+  </section>
+
+  <!-- OPTIMIZER INPUTS -->
+  <section id="view-optparams" class="view">
+    <div class="view-head">
+      <div>
+        <h2>Optimizer inputs</h2>
+        <p class="muted">The extra inputs automatic scheduling needs — prices, margins and solver settings. These are deliberately kept out of the planning side: a planner moving a charge by hand never needs them. Everything factual (yields, rates, capacities, feeds, downtime) comes from the planning side unchanged.</p>
+      </div>
+    </div>
+    <div id="opt-ready" class="stat-row"></div>
+    <div class="card"><div id="opt-params" class="table-wrap"></div></div>
+  </section>
+
+  <!-- OPTIMIZER RUNS -->
+  <section id="view-optruns" class="view">
+    <div class="view-head">
+      <div>
+        <h2>Runs &amp; results</h2>
+        <p class="muted">Each run reads the selected scenario, solves, and writes its answer back as a new scenario — so a proposed schedule opens on the planning side exactly like one you built.</p>
+      </div>
+      <button id="opt-run" class="btn">Run optimizer</button>
+    </div>
+    <div class="card"><div id="opt-runs" class="table-wrap tall"></div></div>
+  </section>
+
+  <!-- REFERENCE / MODEL INPUTS -->
+  <section id="view-reference" class="view">
+    <div class="view-head">
+      <div>
+        <h2>Model inputs</h2>
+        <p class="muted">The yields, rates, capacities and control limits every projection rests on. Imported from the workbook and editable here — the imported value is always kept alongside your edit, so a re-import refreshes the source without discarding corrections.</p>
+      </div>
+      <p class="muted" id="ref-meta"></p>
+    </div>
+    <div id="ref-groups" class="feed-grid"></div>
+    <div class="card" id="ref-detail" hidden>
+      <div class="feed-detail-head">
+        <div>
+          <h3 id="ref-title"></h3>
+          <p class="muted" id="ref-sub"></p>
+        </div>
+        <div class="controls">
+          <input id="ref-search" type="search" placeholder="Search…">
+          <label class="check"><input type="checkbox" id="ref-edited-only"><span>Edited only</span></label>
+        </div>
+      </div>
+      <div id="ref-table" class="table-wrap tall"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

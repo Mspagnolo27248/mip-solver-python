@@ -1,0 +1,60 @@
+[layout] charge block TRANSFER_FINDSL row 136 is empty
+[layout] charge block TRANSFER_CAT row 150 is empty
+[formula_regions] Solvents row 33 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-30
+[formula_regions] Solvents row 63 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-27
+[formula_regions] Solvents row 78 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-27
+[formula_regions] Solvents row 93 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-31
+[formula_regions] Solvents row 108 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-02
+[formula_regions] Solvents row 123 (Forecast) changes formula 1 time(s) across the horizon at 2027-01-07
+[formula_regions] LLN row 17 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] LLN row 31 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] LLN row 45 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] LLN row 46 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-28
+[formula_regions] LLN row 59 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] LLN row 60 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-03
+[formula_regions] LLN row 75 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-03
+[formula_regions] Cstock row 17 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 31 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 32 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-30
+[formula_regions] Cstock row 45 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 46 (Forecast) changes formula 3 time(s) across the horizon at 2026-07-26, 2026-07-27, 2026-08-02
+[formula_regions] Cstock row 59 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 60 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-02
+[formula_regions] Cstock row 73 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 76 (Production Out) changes formula 1 time(s) across the horizon at 2026-12-23
+[formula_regions] Cstock row 87 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 88 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-02
+[formula_regions] Cstock row 101 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 102 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-27
+[formula_regions] Cstock row 115 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 116 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-30
+[formula_regions] Cstock row 129 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 130 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-30
+[formula_regions] Cstock row 144 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Cstock row 161 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-07
+[formula_regions] MN row 17 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] MN row 31 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] MN row 45 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] MN row 46 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-31
+[formula_regions] MN row 59 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] MN row 60 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-25
+[formula_regions] MN row 73 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] MN row 74 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-01
+[formula_regions] MN row 87 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] MN row 88 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-27
+[formula_regions] HN row 17 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] HN row 31 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] HN row 45 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] HN row 46 (Forecast) changes formula 1 time(s) across the horizon at 2026-08-02
+[formula_regions] HN row 59 (Blends) changes formula 1 time(s) across the horizon at 2027-05-23
+[formula_regions] Napthas row 33 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-30
+[formula_regions] Napthas row 48 (Forecast) changes formula 1 time(s) across the horizon at 2026-07-29
+[blend_bom] BOM for blend 4548 sums to 0.5000, not 1.0
+[blend_bom] BOM for blend 7320 sums to 0.9762, not 1.0
+[yields] crude row 27 product 0101 has no CRUDE YIELDS entry
+[yields] Production-Out row 46 (8135 -> 8135) has no charge line in unit HYDRO
+[yields] Production-Out row 70 (9118 -> 9202) has no charge line in unit TOLLING
+[capacity] block Solvents:14 capacity changes over the horizon (350,000 -> 650,000); modelled as an effective-dated series
+[capacity] block Solvents:29 capacity changes over the horizon (730,000 -> 810,000); modelled as an effective-dated series
+[capacity] block Solvents:74 capacity changes over the horizon (596,200 -> 676,200); modelled as an effective-dated series
+[capacity] block Solvents:89 capacity changes over the horizon (438,000 -> 738,000); modelled as an effective-dated series

@@ -1,0 +1,21 @@
+[
+ {
+  "id": "tail-month-cross-sheet-reference",
+  "description": "From 2027-05-23 the Blends rows in LLN/MN/HN/Cstock were filled with a pasted formula that takes its month from a fixed cell on another sheet (Cstock!RN40) instead of the column's own date, and switches the base-oil-transfer term from the monthly table to the daily-projection column. The month is therefore wrong for the whole tail span.",
+  "sheets": ["LLN", "MN", "HN", "Cstock"],
+  "rows": ["Blends", "Begin Inventory", "End Inventory", "Net Charge Available", "Excess Capacity"],
+  "from_date": "2027-05-23",
+  "engine_behaviour": "Uses the month of the day being calculated, which is what every other span of the same row does.",
+  "action": "Confirm with planning that the tail months are meant to follow the calendar, then drop the pasted formulas from the workbook."
+ },
+ {
+  "id": "production-out-row-46-na",
+  "description": "Production - Out row 46 looks up charge product 8135 in the hydrotreater charge range, but 8135 is not a hydrotreater charge line, so the row evaluates to #N/A for every day. The error propagates through the SUMIF roll-up, leaving product 8135 with no usable production figure anywhere in the workbook.",
+  "sheets": ["Solvents"],
+  "rows": ["Production In", "Net Charge Available", "End Inventory", "Excess Capacity", "Begin Inventory"],
+  "from_date": "1900-01-01",
+  "blocks": ["Solvents:164"],
+  "engine_behaviour": "Computes 8135 production from the charge lines that exist, yielding zero rather than an error.",
+  "action": "Decide whether 8135 should be a hydrotreater charge line or the row should be deleted."
+ }
+]

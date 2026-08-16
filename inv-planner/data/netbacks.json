@@ -1,0 +1,168 @@
+{
+ "source": "netbacks.xlsx, supplied by operations",
+ "basis": "gross profit, USD per gallon",
+ "captured": "2026-08-13",
+ "note": "Keyed by SALES code, not the production code the model tracks - see economics.price_key(). Gross profit already nets the crude cost, so it drops straight into the objective as the margin forgone.",
+ "values": {
+  "DSL": {
+   "gross_profit_per_gal": 0.8,
+   "name": "Finished diesel",
+   "kind": "Product"
+  },
+  "4305": {
+   "gross_profit_per_gal": 2.9,
+   "name": "KENDEX 0150",
+   "kind": "Product"
+  },
+  "4115": {
+   "gross_profit_per_gal": 1.52,
+   "name": "KENSOL 48H",
+   "kind": "Product"
+  },
+  "4315": {
+   "gross_profit_per_gal": 3.1,
+   "name": "KENDEX 0150H",
+   "kind": "Product"
+  },
+  "4118": {
+   "gross_profit_per_gal": 1.52,
+   "name": "KENSOL 50H",
+   "kind": "Product"
+  },
+  "4129": {
+   "gross_profit_per_gal": 1.6,
+   "name": "KENSOL 61H",
+   "kind": "Product"
+  },
+  "4309": {
+   "gross_profit_per_gal": 3.1,
+   "name": "KENDEX 0750",
+   "kind": "Product"
+  },
+  "4451": {
+   "gross_profit_per_gal": 3.0,
+   "name": "KENWAX MED NEUTRAL SLACK WAX",
+   "kind": "Product"
+  },
+  "4327": {
+   "gross_profit_per_gal": 2.88,
+   "name": "KENDEX 0060H",
+   "kind": "Product"
+  },
+  "4111": {
+   "gross_profit_per_gal": 3.1,
+   "name": "KENSOL 30",
+   "kind": "Product"
+  },
+  "4319": {
+   "gross_profit_per_gal": 5.5,
+   "name": "ARGOLD",
+   "kind": "Product"
+  },
+  "4317": {
+   "gross_profit_per_gal": 6.0,
+   "name": "KENDEX 0846",
+   "kind": "Product"
+  },
+  "9207": {
+   "gross_profit_per_gal": 3.0,
+   "name": "KENDEX 0834",
+   "kind": "Product"
+  },
+  "4318": {
+   "gross_profit_per_gal": 5.0,
+   "name": "ARGOLD LEGACY",
+   "kind": "Product"
+  },
+  "9703": {
+   "gross_profit_per_gal": 1.52,
+   "name": "KENSOL 61 UNHT",
+   "kind": "Product"
+  },
+  "4459": {
+   "gross_profit_per_gal": 2.8,
+   "name": "KENWAX 0111 PETROLATUM",
+   "kind": "Product"
+  },
+  "9720": {
+   "gross_profit_per_gal": 2.3,
+   "name": "DEWAXED, UNEXT LN CHARGE",
+   "kind": "Product"
+  },
+  "4449": {
+   "gross_profit_per_gal": 2.5,
+   "name": "KENWAX LIGHT NEUTRAL SLACK WAX",
+   "kind": "Product"
+  },
+  "4555": {
+   "gross_profit_per_gal": 1.1,
+   "name": "LR RESINS",
+   "kind": "Product"
+  },
+  "4454": {
+   "gross_profit_per_gal": 0.9,
+   "name": "KENWAX HEAVY NEUTRAL SLACK WAX",
+   "kind": "Product"
+  },
+  "4577": {
+   "gross_profit_per_gal": 1.2,
+   "name": "KENDEX MNE",
+   "kind": "Product"
+  },
+  "8201": {
+   "gross_profit_per_gal": -0.32,
+   "name": "6 OIL",
+   "kind": "Product"
+  },
+  "4107": {
+   "gross_profit_per_gal": 3.0,
+   "name": "KENSOL 17",
+   "kind": "Product"
+  },
+  "4313": {
+   "gross_profit_per_gal": 6.0,
+   "name": "KENDEX 0842",
+   "kind": "Product"
+  },
+  "9713": {
+   "gross_profit_per_gal": 0.35,
+   "name": "No.2 Diesel-Hydro Charge",
+   "kind": "Sold as-is"
+  },
+  "GASOLINE": {
+   "gross_profit_per_gal": 0.5,
+   "name": "Gasoline blending pool",
+   "kind": "Downgrade outlet"
+  },
+  "8221": {
+   "gross_profit_per_gal": -0.32,
+   "name": "Cat cracker feed",
+   "kind": "Downgrade outlet"
+  },
+  "4105": {
+   "gross_profit_per_gal": 1.4,
+   "name": "KENSOL 48 UNHT (9711)",
+   "kind": "Sold as-is",
+   "source": "operations, supplied in conversation - not in netbacks.xlsx"
+  },
+  "9712": {
+   "gross_profit_per_gal": 1.4,
+   "name": "KENSOL 50 UNHT",
+   "kind": "Sold as-is",
+   "source": "operations, supplied in conversation - not in netbacks.xlsx"
+  },
+  "9116": {
+   "gross_profit_per_gal": 1.4,
+   "name": "WAXY LIGHT NEUTRAL (9718)",
+   "kind": "Sold as-is",
+   "source": "operations, supplied in conversation - not in netbacks.xlsx"
+  },
+  "9103": {
+   "gross_profit_per_gal": -0.32,
+   "name": "PLATFORMER CHARGE (NAPHTHA)",
+   "kind": "Product",
+   "source": "operations, supplied in conversation - not in netbacks.xlsx"
+  }
+ },
+ "missing": []
+}

@@ -1,0 +1,36 @@
+kind,code,sales_code,name,needs_netback,netback_gross_profit_usd_per_gal,demand_42d_gal,sales_gal,forecast_gal,blends_gal,pct_of_demand,cumulative_pct,sink_routes,note
+product,9511,9511,PLATFORMATE,no,,3150000,0,3150000,0,20.1,20.1,GASOLINE,"Forecast IS the E10 gasoline pull (5020, 75/25). Value = GASOLINE netback."
+product,DSL,DSL,,yes,,2940000,0,2940000,0,18.8,38.9,,
+product,1128,1128,ISOMERATE,no,,1050000,0,1050000,0,6.7,45.6,GASOLINE,"Forecast IS the E10 gasoline pull (5020, 75/25). Value = GASOLINE netback."
+product,9704,4305,KENDEX 0150,yes,,1011899,540000,16129,455770,6.5,52.1,,Tracked as 9704 but sold as 4305 - price the sales code.
+product,4115,4115,KENSOL 48H,yes,,935246,4006,896814,34426,6,58.1,,
+product,9103,9103,PLATFORMER CHARGE (NAPHTHA),yes,,888427,817201,71226,0,5.7,63.7,,
+product,4315,4315,KENDEX 0150H,yes,,687741,266840,232960,187941,4.4,68.1,,
+product,4118,4118,KENSOL 50H,yes,,607148,76000,531148,0,3.9,72,DIESEL,
+product,4129,4129,KENSOL 61H,yes,,464954,195684,269270,0,3,75,,
+product,4309,4309,KENDEX 0750,yes,,461376,0,0,461376,2.9,77.9,,
+product,4451,4451,KENWAX MED NEUTRAL SLACK WAX,yes,,419416,114977,294111,10328,2.7,80.6,CAT,
+product,4329,4327,KENDEX 0060H,yes,,409692,99172,65603,244917,2.6,83.2,DIESEL,Tracked as 4329 but sold as 4327 - price the sales code.
+product,4111,4111,KENSOL 30,yes,,383091,440,382651,0,2.4,85.7,DIESEL,
+product,4319,4319,ARGOLD,yes,,354820,120000,219579,15241,2.3,87.9,,
+product,4317,4317,KENDEX 0846,yes,,306284,104645,201639,0,2,89.9,,
+product,4554,9207,KENDEX 0834,yes,,284072,92427,89677,101968,1.8,91.7,SIX_OIL,Tracked as 4554 but sold as 9207 - price the sales code.
+product,4318,4318,ARGOLD LEGACY,yes,,270610,31904,127193,111513,1.7,93.4,,
+product,9703,9703,KENSOL 61 UNHT,yes,,187866,51800,101639,34426,1.2,94.6,DIESEL,
+product,4459,4459,KENWAX 0111 PETROLATUM,yes,,154163,62032,92131,0,1,95.6,,
+product,9720,9720,"DEWAXED, UNEXT LN CHARGE",yes,,152748,53600,99148,0,1,96.6,DIESEL,
+product,4449,4449,KENWAX LIGHT NEUTRAL SLACK WAX,yes,,149957,107247,42710,0,1,97.5,CAT,
+product,4555,4555,KENDEX 0897,yes,,141129,22113,119016,0,0.9,98.4,,
+product,4454,4454,KENWAX HEAVY NEUTRAL SLACK WAX,yes,,125727,52394,49235,24098,0.8,99.3,SIX_OIL,
+product,4577,4577,KENDEX MNE,yes,,72118,7200,64918,0,0.5,99.7,SIX_OIL,
+product,8201,8201,6 OIL,yes,,25000,25000,0,0,0.2,99.9,,
+product,4107,4107,KENSOL 17,yes,,17213,0,17213,0,0.1,100,,
+product,4313,4313,KENDEX 0842,yes,,2754,0,2754,0,0,100,,
+product,9713,9713,NO.2 DIESEL-HYDRO CHARGE,yes,,0,0,0,0,0,,,No demand row - lifted as-is. Currently modelled as finished diesel less $0.60; an absolute retires that.
+product,9711,4105,KENSOL 48 UNHT,yes,,0,0,0,0,0,,DIESEL,"No demand this window, but sellable and downgradable to diesel - the downgrade cannot be priced without its value."
+product,9712,9712,KENSOL 50 UNHT,yes,,0,0,0,0,0,,DIESEL,"No demand this window, but sellable and downgradable to diesel - the downgrade cannot be priced without its value."
+product,9718,9116,WAXY LIGHT NEUTRAL,yes,,0,0,0,0,0,,DIESEL,"No demand this window, but sellable and downgradable to diesel - the downgrade cannot be priced without its value."
+sink,SIX_OIL,8201,#6 oil,yes,,0,0,0,0,,,8201,assumed crude less $0.50/gal
+sink,CAT,8221,Cat cracker,yes,,0,0,0,0,,,8221,assumed crude less $0.50/gal
+sink,DIESEL,DSL,Diesel pool,yes,,0,0,0,0,,,DSL,pool 8 products downgrade into; finished diesel value is the DSL row
+sink,GASOLINE,-,Gasoline,yes,,0,0,0,0,,,-,NEVER PRICED. Value of platformate 9511 + isomerate 1128 - 27% of demand.
