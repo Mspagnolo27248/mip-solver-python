@@ -52,21 +52,69 @@ def _unit_yields(payload: Dict[str, Any]) -> List[Tuple[str, str, float, str]]:
 
 
 def _max_rates(payload: Dict[str, Any]) -> List[Tuple[str, str, float, str]]:
+    """Every charge rate the model uses, not only the units it schedules.
+
+    This listed `DECISION_UNITS` and so hid the platformer complex entirely -
+    reported by a planner who went looking for its rates and found nothing. The
+    platformer is not a unit the optimizer *assigns*, but its rates bound how
+    much reformate and isomerate the plant can make, and 9103 backing up against
+    that ceiling is what throttles the whole complex late in a window. A rate
+    the model obeys belongs on this screen whether or not the model chooses the
+    feed.
+
+    Per-line rates are listed too. Extraction runs 9305 two ways - normal to
+    Argold at 2,200 bbl/day and deep to hydrotreater feed at 1,300 - and keyed by
+    product alone the deep mode silently inherits the shallow figure.
+    """
     out = []
     products = payload.get("products", {})
-    for unit in cfg.DECISION_UNITS:
-        for code, info in cfg.MAX_RATE_BBL_PER_DAY.get(unit, {}).items():
-            name = (products.get(code, {}) or {}).get("name", "")
-            note = "" if info["basis"] == "clean day" else " (grossed up)"
-            out.append((unit, code, float(info["bbl"]), name + note))
+
+    def label(code, info, suffix=""):
+        name = (products.get(code, {}) or {}).get("name", "")
+        note = "" if info.get("basis") == "clean day" else " (grossed up)"
+        return (name + suffix + note).strip()
+
+    for unit in sorted(cfg.MAX_RATE_BBL_PER_DAY):
+        for code, info in cfg.MAX_RATE_BBL_PER_DAY[unit].items():
+            out.append((unit, code, float(info["bbl"]), label(code, info)))
+    # Keyed by line rather than product, so they cannot collide with the above.
+    for line_key, info in sorted(cfg.MAX_RATE_BY_LINE.items()):
+        unit = line_key.split("#")[0]
+        code = info.get("product") or line_key
+        out.append((unit, line_key, float(info["bbl"]),
+                    label(code, info, " " + (info.get("basis") or ""))))
     return out
 
 
 def _tank_capacity(payload: Dict[str, Any]) -> List[Tuple[str, str, float, str]]:
+    """One row per tank the model actually carries.
+
+    The workbook splits finished diesel into ten grades and the model collapses
+    them into a single pool, so listing the members offered five diesel tanks
+    that no edit could reach - none of them is a product the optimizer has - and
+    offered no row for the pool that is. A planner could change every diesel
+    capacity on the screen and move nothing.
+
+    So the members are dropped and the aggregate is listed once, under its own
+    id, editable. That is also the only diesel capacity worth arguing about: the
+    members sum to 948,825 gal but six of them have no tank recorded, which is
+    why the pool carries its own figure in the first place.
+    """
     products = payload.get("products", {})
-    return [(code, None, float(value),
-             (products.get(code, {}) or {}).get("name", ""))
-            for code, value in sorted(payload.get("tank_capacity", {}).items())]
+    caps = dict(payload.get("tank_capacity", {}))
+    rows = []
+    for agg in cfg.AGGREGATIONS:
+        hidden = set(agg["members"]) | {agg.get("pool")}
+        for code in hidden:
+            caps.pop(code, None)
+        rows.append((agg["id"], None,
+                     float(caps.pop(agg["id"], None) or
+                           agg.get("capacity_override") or 0.0),
+                     agg.get("title") or agg["id"]))
+    rows.extend((code, None, float(value),
+                 (products.get(code, {}) or {}).get("name", ""))
+                for code, value in caps.items())
+    return sorted(rows)
 
 
 def _targets(payload: Dict[str, Any], which: str
@@ -218,7 +266,18 @@ def apply_overrides(db: Session, rv: ReferenceVersion) -> Dict[str, Any]:
     for o in rows:
         v = o.override_value
         if o.kind == RefKind.CRUDE_YIELD:
+            # Two copies of the same number live in the payload, and the model
+            # reads the one the editor was not writing to. `crude_yields` is what
+            # the screen lists; the optimizer's supply comes from the *crude*
+            # yield rules' `monthly_yield`, so an edit landed on the display copy
+            # and the plant kept making exactly what it made before. Same shape
+            # as the max-rate no-op, and worse in effect: crude yields set how
+            # much of every side stream arrives at all.
             payload.setdefault("crude_yields", {}).setdefault(o.k1, {})[o.k2] = v
+            for rule in payload.get("yield_rules", []):
+                if rule.get("kind") == "crude" and rule.get("out") == o.k1:
+                    if o.k2 in (rule.get("monthly_yield") or {}):
+                        rule["monthly_yield"][o.k2] = v
         elif o.kind == RefKind.UNIT_YIELD:
             unit, charge, out = o.k1.split("|")
             for rule in payload.get("yield_rules", []):

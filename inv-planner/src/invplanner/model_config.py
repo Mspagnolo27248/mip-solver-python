@@ -10,6 +10,7 @@ Every entry states why, so the simplification can be argued with.
 """
 from __future__ import annotations
 
+import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 
@@ -347,6 +348,13 @@ UNIT_REACTORS: Dict[str, Dict[str, Any]] = {
 #: is a specification. Everything else is a floor, and the build says so.
 RATE_BASIS_IS_FLOOR: Dict[str, bool] = {
     "confirmed with operations": False,
+    # A planner typing a rate is stating a limit, not reporting an observation,
+    # so it binds even against a plan that exceeds it. Defaulting it to a floor
+    # like the measured bases is what made the edit look accepted and do
+    # nothing: the ceiling reached the spec correctly and was then read as
+    # "the largest we have seen", so `max(override, what the plan ran)` handed
+    # the original number straight back.
+    "planner override": False,
     "clean day": True,
     "grossed up": True,
     "derived from the fractionator": True,
@@ -786,11 +794,104 @@ def turnaround_days(unit: str) -> set:
     return out
 
 
+def next_outage(days, after, reach_days: int = 90) -> List[Any]:
+    """The next unbroken outage starting after `after`, from a set of down days.
+
+    Takes the days rather than a unit name **so the planner's own turnaround
+    dates drive it**. Downtime is scenario data, edited on the planning side and
+    carried to the optimizer per run; `TURNAROUNDS` here is only the fallback
+    inferred from the workbook when a scenario carries none. Reading the table
+    directly would have meant a planner moving a turnaround saw the units stop
+    on the new dates while the tanks were still being drained for the old ones -
+    and the two only agree today because both were seeded from the same
+    inference.
+
+    Empty if there is none inside `reach_days`. Only the *next* one matters: a
+    tank has to survive the outage it meets first, and by the time the second
+    arrives the plan has had a whole outage to rearrange itself.
+    """
+    import datetime as _d
+
+    ahead = [d for d in sorted(days)
+             if after < d <= after + _d.timedelta(days=reach_days)]
+    if not ahead:
+        return []
+    run = [ahead[0]]
+    for d in ahead[1:]:
+        if (d - run[-1]).days == 1:
+            run.append(d)
+        else:
+            break
+    return run
+
+
 def must_run(unit: str, day) -> bool:
     """True when the unit is required to produce something on this day."""
     if not MUST_RUN_WHEN_AVAILABLE:
         return False
     return day not in turnaround_days(unit)
+
+
+#: Safety stock in gallons, per product, where operations have given a real one.
+#:
+#: **Empty on purpose**, like every other table here that would otherwise carry an
+#: invented number. `RefKind.TARGET_LCL` is the eventual home - the reference layer
+#: already has a slot for a lower control limit per product - but the workbook sets
+#: none, and `modelprep` does not carry the field through to the spec yet. Until it
+#: does, the floor is derived from days of cover (`safety_stock_days`), which is a
+#: statement about demand rather than about the tank.
+#:
+#: An entry here overrides the derived figure for that product, so the first real
+#: number operations supply can land without waiting for the rest.
+SAFETY_STOCK_GAL: Dict[str, float] = {}
+
+
+#: The last day the workbook's inputs can be believed. Confirmed with operations.
+#:
+#: The scenario carries 366 dates, 2026-07-23 to 2027-07-23, and the workbook has
+#: columns for all of them - so nothing about the data announces where it stops
+#: being real. Three things end at different points and only one of them matters:
+#:
+#:     2026-10-15   last firm Open Order (57 days); forecast beyond
+#:     2026-12-31   last day the planner filled in a charge  <- the boundary
+#:     2027-07-17   extent of the Charge Schedule date columns
+#:
+#: **Past 2026-12-31 the demand inputs are wrong**, and the schedule is empty for
+#: MEK, extraction, ROSE and the hydrotreater. Crude is a fixed input and keeps
+#: running, so the side streams keep arriving with nothing charging them and the
+#: feed tanks fill until they burst - 9117 alone by 9.8 M gal/day, which is what
+#: made a full-year run infeasible at every charge floor including zero.
+#:
+#: That infeasibility was a symptom. The cause is that the question was asked of
+#: days the workbook cannot answer for, and no parameter can fix it: it needs
+#: schedule and demand data that do not exist yet.
+#:
+#: **The practical limit is two days shorter still: 160 days, ending
+#: 2026-12-29.** 161 is infeasible, and for a much smaller reason than the
+#: full-year case - the elastic diagnostic returns exactly one violation, 9103
+#: platformer charge overflowing its tank by 81,759 gal on 2026-12-30. That is an
+#: edge-of-window effect on a single product, not a structural break, which is
+#: worth knowing before anyone goes looking for a deep cause. It is also why
+#: every report in `data/reports` is named `*-160`: the edge was found
+#: empirically before it was explained.
+DATA_VALID_THROUGH = _dt.date(2026, 12, 31)
+
+#: The longest horizon that actually solves. See above for what the 161st day
+#: costs. Kept separate from `DATA_VALID_THROUGH` because they are different
+#: claims: one is about the data, the other about this plan's tank levels, and a
+#: revised plan could move the second without touching the first.
+MAX_SOLVABLE_DAYS = 160
+
+
+def clamp_horizon(dates: List[Any]) -> List[Any]:
+    """Cut a horizon back to the last day the inputs can be believed.
+
+    Silently truncating is the wrong instinct in general, but here the
+    alternative is worse: the model does not fail on bad days, it produces a
+    confident schedule built on demand nobody stands behind, or an infeasibility
+    whose real cause is three layers away from the error.
+    """
+    return [d for d in dates if d <= DATA_VALID_THROUGH]
 
 
 #: A unit runs at most this many charge products in a day.

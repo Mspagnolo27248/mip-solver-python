@@ -116,6 +116,29 @@ def _add_missing_sink_lines(ref: Reference) -> List[Dict[str, Any]]:
     return added
 
 
+def _rated(overrides, unit, code, info):
+    """A rate with the planner's edit applied, if they made one.
+
+    The edit screen has always accepted these and the model has always ignored
+    them: the override was written into the reference payload and read by
+    nothing, so a planner could change a maximum charge rate, watch it save, and
+    get the old number back in the schedule. A silent no-op is worse than a
+    missing field - the missing field at least tells you it is missing.
+
+    Keyed by unit then code, where code is a product or a line key, so a per-line
+    ceiling can be edited without disturbing the product-level one. `basis` is
+    rewritten because the imported basis describes where the *original* number
+    came from, and it no longer does.
+    """
+    v = (overrides.get(unit) or {}).get(code)
+    if v is None:
+        return info
+    out = dict(info or {})
+    out["bbl"] = float(v)
+    out["basis"] = "planner override"
+    return out
+
+
 def build(ref: Reference, scn: Scenario, sim: Simulation,
           horizon: Optional[List[dt.date]] = None,
           downtime: Optional[Dict[str, set]] = None) -> ModelSpec:
@@ -195,7 +218,18 @@ def build(ref: Reference, scn: Scenario, sim: Simulation,
         if not p:
             continue
         p["name"] = agg["title"]
-        if agg.get("capacity_override") is not None:
+        # A capacity typed against the aggregate wins. The config figure exists
+        # because the members' recorded tanks do not add up - six of the ten have
+        # none - so it is a stand-in, not a fact, and a planner correcting it
+        # should not be overruled by it.
+        edited = (ref.raw.get("tank_capacity") or {}).get(agg["id"])
+        if edited:
+            p["capacity_from_members"] = p["capacity"]
+            p["capacity"] = float(edited)
+            spec.notes.append(
+                "{}: capacity set to {:,.0f} gal on the planning side."
+                .format(agg["id"], float(edited)))
+        elif agg.get("capacity_override") is not None:
             p["capacity_from_members"] = p["capacity"]
             p["capacity"] = agg["capacity_override"]
             spec.notes.append("{}: {}".format(agg["id"], agg["capacity_note"]))
@@ -350,6 +384,8 @@ def build(ref: Reference, scn: Scenario, sim: Simulation,
 
     for unit, products in by_unit.items():
         arcs = cfg.allowed_arcs(unit, products, resolve)
+        # Planner edits to the charge rates, folded in by `effective_payload`.
+        overrides = (ref.raw or {}).get("max_rate_overrides") or {}
         workbook_of = {}
         for line in spec.charge_lines:
             if line["unit"] == unit:
@@ -372,7 +408,8 @@ def build(ref: Reference, scn: Scenario, sim: Simulation,
                              for p in products},
             "switch_loss_days": cfg.switch_loss_days(unit),
             "reactors": reactors,
-            "max_rate": {p: cfg.max_rate_info(unit, workbook_of.get(p, p))
+            "max_rate": {p: _rated(overrides, unit, workbook_of.get(p, p),
+                                   cfg.max_rate_info(unit, workbook_of.get(p, p)))
                          for p in products},
             # Keyed by product, `max_rate` cannot describe a unit that runs one
             # feed two ways - extraction's normal and deep modes both charge
@@ -380,8 +417,11 @@ def build(ref: Reference, scn: Scenario, sim: Simulation,
             # reads; this one stays for the report and for units with one line
             # per feed.
             "max_rate_by_line": {
-                l["key"]: cfg.max_rate_info(unit, l["workbook_product"],
-                                            l["key"])
+                l["key"]: _rated(
+                    overrides, unit, l["key"],
+                    _rated(overrides, unit, l["workbook_product"],
+                           cfg.max_rate_info(unit, l["workbook_product"],
+                                             l["key"])))
                 for l in spec.charge_lines if l["unit"] == unit},
             "min_rate_bbl": {p: cfg.min_rate_bbl(unit, workbook_of.get(p, p))
                              for p in products},
