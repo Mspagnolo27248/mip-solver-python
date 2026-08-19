@@ -1,0 +1,11 @@
+# Python build artefacts
+__pycache__/
+*.py[cod]
+
+# Excel lock files, left behind while a workbook is open
+~$*
+
+# Working outputs from an optimizer run. The schedule that matters is committed
+# as a scenario in the database and exported on demand, so these are copies.
+v2 user test *.xlsx
+v2 user test *.csv
