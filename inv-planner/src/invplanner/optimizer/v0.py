@@ -40,6 +40,26 @@ except ImportError:      # pragma: no cover - checked at call time
     pulp = None
 
 
+#: How far a pinned charge may drift from the schedule handed in. See `pin_units`.
+PIN_TOLERANCE = 1e-6
+
+
+def line_rate(spec, unit: str, line_key: str, product: str):
+    """The charge ceiling for a line, as the *spec* has it.
+
+    Read from the spec rather than straight from `model_config`, because the
+    spec is where a planner's edit has been folded in. Calling the config
+    directly is what made the rate editor a silent no-op: the override was
+    written to the reference payload, `modelprep` never applied it, and the
+    solver asked the config for the original number every time.
+
+    Keyed by line, so extraction's two ways of running 9305 keep their own
+    ceilings. Falls back to the config for anything the spec does not carry.
+    """
+    info = ((spec.units.get(unit) or {}).get("max_rate_by_line") or {}).get(line_key)
+    return info if info else cfg.max_rate_info(unit, product, line_key)
+
+
 def spec_line_charges(spec, line_key: str) -> Optional[str]:
     """The product a charge line consumes."""
     for line in spec.charge_lines:
@@ -70,6 +90,10 @@ class OptimizeResult:
         self.transfer_bbl: Dict[str, Dict[str, float]] = {}
         #: unit -> {day: line the unit is set up for}, only for freed units.
         self.schedule: Dict[str, Dict[str, Optional[str]]] = {}
+        #: product -> {day: gallons in tank at end of day}. Needed to hand a
+        #: window's closing tanks to the next one, and the only way to see a
+        #: tank run dry without replaying the whole schedule.
+        self.inventory: Dict[str, Dict[str, float]] = {}
         self.kpis: Dict[str, Any] = {}
 
 
@@ -77,7 +101,12 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
           horizon: Optional[List[dt.date]] = None,
           downtime: Optional[Dict[str, set]] = None,
           elastic: bool = False,
-          free_units: Optional[List[str]] = None) -> OptimizeResult:
+          free_units: Optional[List[str]] = None,
+          pin_units: Optional[List[str]] = None,
+          opening_override: Optional[Dict[str, float]] = None,
+          setup_override: Optional[Dict[str, str]] = None,
+          terminal_condition: bool = True,
+          boundary_day: Optional[str] = None) -> OptimizeResult:
     """Solve v0, or v1 for whichever units are freed.
 
     `free_units` names the units whose *assignment* becomes a decision: they get
@@ -101,6 +130,30 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
 
     res = OptimizeResult()
     dates = horizon or scn.dates[:params.get("horizon_days", 42)]
+    # Every caller comes through here, so the boundary is enforced once. Asking
+    # for days the workbook cannot answer for does not fail loudly - it returns a
+    # confident schedule built on demand nobody stands behind, or an
+    # infeasibility whose cause is three layers from the error.
+    asked = len(dates)
+    dates = cfg.clamp_horizon(dates)
+    if not dates:
+        res.status = "no_solution"
+        res.message = ("the whole horizon falls past {}, the last day the "
+                       "workbook's inputs can be believed"
+                       .format(cfg.DATA_VALID_THROUGH))
+        return res
+    truncated = asked - len(dates)
+    #: Units whose charges are held exactly at the schedule handed in, so a
+    #: decomposition can settle one unit and pass it on untouched. See
+    #: `optimizer/v2.py` for why that is the only way the hydrotreater solves.
+    pinned = set(pin_units or [])
+    #: What a window inherits from the one before it: tanks as they were left,
+    #: and what each freed unit was set up for on the last committed day. Without
+    #: both, consecutive windows are separate plans that happen to be adjacent -
+    #: the second would restart every tank at the plan's opening and every unit
+    #: on the plan's first feed, and owe no flush for doing it.
+    opening_at = dict(opening_override or {})
+    setup_at = dict(setup_override or {})
     down = downtime or {}
     iso = [d.isoformat() for d in dates]
     free = set(free_units or [])
@@ -234,7 +287,7 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     chg = {}
     for line in lines:
         unit = line["unit"]
-        info = cfg.max_rate_info(unit, line["workbook_product"], line["key"])
+        info = line_rate(spec, unit, line["key"], line["workbook_product"])
         ceiling = info["bbl"] if info else None
         flows = line["key"] in cfg.FLOW_THROUGH_LINES
         # Charging an untanked intermediate: the identity fixes the level, so no
@@ -291,6 +344,23 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                 # Clamp: on a day the plan overran a confirmed ceiling the floor
                 # would otherwise sit above it and the model would be infeasible.
                 lo = min(was * floor, hi)
+            if unit in pinned:
+                # Held where it is, not merely floored. A stage that has already
+                # decided a unit's schedule has to hand it on untouched; leaving
+                # the floor to do it would let the next stage take 70% of the
+                # decision back, and the two stages would no longer add up to one
+                # schedule.
+                #
+                # A hair of tolerance rather than a flat equality, because an
+                # exact pin is infeasible on a knife edge. Stage one drains 9302
+                # - a dewaxed oil MEK makes and extraction eats - to precisely
+                # zero on 2026-08-02, and pinning producer and consumer to the
+                # same float leaves the balance no room to reproduce it: the
+                # elastic diagnostic returns one violation of magnitude *zero*.
+                # A part per million of 5,000 bbl is five thousandths of a
+                # barrel, which is nothing physically and everything numerically.
+                hi = was * (1.0 + PIN_TOLERANCE)
+                lo = was * (1.0 - PIN_TOLERANCE)
             chg[(line["key"], s)] = pulp.LpVariable(
                 "chg_{}_{}".format(line["key"].replace("#", "_"), s), lo, hi)
 
@@ -498,7 +568,7 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                 demand[target][s] += gal
 
     for p in tanked:
-        opening = tanked[p]["opening"]
+        opening = opening_at.get(p, tanked[p]["opening"])
         for i, s in enumerate(iso):
             prev = inv[(p, iso[i - 1])] if i else opening
             made = pulp.lpSum(
@@ -548,8 +618,9 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         ulines = [l for l in lines if l["unit"] == unit]
         keys = [l["key"] for l in ulines]
         arcs = cfg.line_arcs(unit, ulines) or []
-        rate = {l["key"]: cfg.max_rate_info(unit, l["workbook_product"],
-                                            l["key"])["bbl"] for l in ulines}
+        rate = {l["key"]: line_rate(spec, unit, l["key"],
+                                   l["workbook_product"])["bbl"]
+                for l in ulines}
         minrun = {l["key"]: cfg.min_run_days_for_line(
             unit, l["key"], l["workbook_product"]) for l in ulines}
         minrate = {l["key"]: rate[l["key"]] * cfg.min_rate_fraction(
@@ -578,12 +649,28 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                 if (k, s) in chg:
                     tfrac[(k, s)] = pulp.LpVariable(
                         "t_{}_{}".format(k.replace("#", "_"), s), 0, 1)
+        # **The arcs do not need to be binary, and making them so is what puts
+        # the hydrotreater out of reach.** With `one_setup` forcing the setups to
+        # sum to one and the carry equation below linking consecutive days, the
+        # arcs carry flow between two unit vectors - a transshipment structure,
+        # totally unimodular, so a vertex of the relaxation is already integral.
+        # The cap of one changeover a day and a positive cost keep them there.
+        #
+        # It is the difference between a model that solves and one that does not.
+        # The hydrotreater offers 42 arcs against 7 lines, so at 21 days binary
+        # arcs cost 882 binaries against the setups' 147 - six times as many, on
+        # the one unit with no minimum campaign to prune the search. MEK and
+        # extraction have 6 and 9 arcs and never felt it.
+        #
+        # `integral_arcs` restores the binaries for anyone who wants to check the
+        # claim rather than take it: the answers must not move.
+        arc_cat = "Binary" if params.get("integral_arcs") else "Continuous"
         for a in arcs:
             for s in iso:
                 arc[(a, s)] = pulp.LpVariable(
                     "z_{}_{}_{}".format(a[0].replace("#", "_"),
                                         a[1].replace("#", "_"), s),
-                    cat="Binary")
+                    0, 1, cat=arc_cat)
 
         # What the unit is holding when the horizon opens. The live feed should
         # supply this; until it does, the last thing the plan ran before the
@@ -601,7 +688,7 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                 if hit:
                     opening_key = hit[0]
                     break
-        day_zero[unit] = opening_key or keys[0]
+        day_zero[unit] = setup_at.get(unit) or opening_key or keys[0]
 
         # ------------------------------------------------------- warm start
         # The planner's own schedule is a feasible assignment, so hand it to the
@@ -783,11 +870,144 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         # sale, which is what stops it shorting customers to hold stock.
         return min(terminal_cost, 0.9 * lost_cost(p))
 
+    # Off for every window but the last. "End no poorer than you started" is a
+    # statement about the *plan*, not about an arbitrary internal boundary -
+    # applied to each window it would force every one of them to rebuild its
+    # tanks by its own final day, which is a constraint the plant never faces and
+    # would quietly undo the point of carrying inventory forward at all.
     term_short = {}
+    if terminal_condition:
+        for p in tanked:
+            v = pulp.LpVariable("term_{}".format(p), 0)
+            term_short[p] = v
+            prob += inv[(p, iso[-1])] + v >= tanked[p]["opening"],                 "term_{}".format(p)
+
+    # ------------------------------------------------- what a window leaves behind
+    # A window hands its tanks to the next one, and the next one cannot see what
+    # is coming for them. That is survivable for most products and fatal for a
+    # few, and which few is not a matter of taste - it is arithmetic.
+    #
+    # 4313 is the case that taught this. Crude makes it at a fixed 10.7% yield
+    # whether anyone wants it or not, ROSE is its **only** exit, it carries 10 k
+    # gal of demand over 160 days and has no downgrade route at all. Its tank is
+    # 440,000 gal against an inflow near 48,700 gal/day - about nine days of
+    # buffer. ROSE then has a nine-day turnaround, which delivers ~438,000 gal
+    # into a 440,000 gal tank: **the outage inflow is the whole tank.** So 4313
+    # has to be nearly empty when ROSE goes down, and ROSE can only out-draw the
+    # inflow by about a third, so the drawdown takes roughly four weeks.
+    #
+    # A window that ends four weeks before that outage plans the drawdown in its
+    # lookahead and then throws it away, and the next window inherits a full tank
+    # with a fortnight to empty it. It cannot, and the run dies on a capacity
+    # violation dated the outage's last day.
+    #
+    # A headroom fraction cannot express this. It was tried at 0.85 and 0.70 and
+    # failed both times, for two reasons worth keeping: it is soft, so a window
+    # pays it and fills the tank anyway; and a *fraction of capacity* is the wrong
+    # unit for a tank measured in days of an inflow nobody controls.
+    #
+    # So the target is computed rather than chosen: leave room for exactly the
+    # inflow the next outage will deliver. Priced high enough to dominate the
+    # ordinary trade-offs, and still finite - an infeasible window kills the run,
+    # which is the failure this exists to prevent.
+    DRAIN_PENALTY = 100.0
+    drain = {}
+    edge = boundary_day or (iso[-1] if not terminal_condition else None)
+    if edge and edge in iso:
+        edge_date = dates[iso.index(edge)]
+        for p in tanked:
+            cap = cap_on(p, edge)
+            if not cap:
+                continue
+            # Whoever eats this product is who has to be running for it to leave.
+            eaters = {l["unit"] for l in lines if l["product"] == p}
+            need = 0.0
+            for unit in sorted(eaters):
+                # `down` is the scenario's own downtime, set on the planning
+                # side and handed to the solver per run - so a turnaround moved
+                # in the app moves the drawdown that protects the tank with it.
+                out_days = cfg.next_outage(down.get(unit, ()), edge_date)
+                if not out_days:
+                    continue
+                # Only the fixed arrivals count. What the units make is a decision
+                # the next window still has; what crude delivers is not.
+                need = max(need, sum(fixed_in[p].get(d.isoformat(), 0.0)
+                                     for d in out_days))
+            if need <= 0:
+                continue
+            v = pulp.LpVariable("drain_{}".format(p), 0)
+            drain[p] = v
+            prob += inv[(p, edge)] - v <= max(0.0, cap - need),                 "drain_{}".format(p)
+
+    # ------------------------------------------------------------ safety stock
+    # The terminal condition pins the last day against the first and says nothing
+    # about the 98 in between, so a tank could sit at zero for weeks and satisfy
+    # every constraint in the model. It did: isomerate spent 41 of 100 days empty
+    # and gave up 244,981 gal of demand the planner's own schedule serves in full,
+    # because at $0.50/gal it is the cheapest thing in the book to short.
+    #
+    # Elastic, and that is not a preference. 9511 has no production at all in this
+    # data - the reformer row was never carried - so a hard floor on it would make
+    # the model infeasible for a reason that has nothing to do with the schedule.
+    #
+    # Days of cover rather than a tank level, because it is the honest shape of
+    # what is known: nobody has set a lower control limit, but demand is measured.
+    # `SAFETY_STOCK_GAL` overrides per product as real figures arrive.
+    # **Off by default**, and deliberately, for the same reason `SWITCH_COST_BY_UNIT`
+    # and `MIN_RATE_FRACTION` ship empty: days of cover is a placeholder for a
+    # number nobody has measured, and a placeholder that changes every answer is
+    # worse than one that waits. It also costs real solve time - at 42 days it is
+    # the difference between v1 proving optimality inside two minutes and not.
+    #
+    # Solved exactly (pure LP, `mip_gap` 0), cover of 0 through 7 days gives a
+    # bit-identical answer at both 42 and 100 days - except 7 days at 42, which
+    # *creates* 16,233 gal of lost isomerate, because stock held is stock not
+    # shipped. As priced the floor is soft and sits far below a lost sale, so the
+    # model absorbs the penalty rather than rearranging the plan.
+    #
+    # Which is the useful result: the tanks are not empty for want of a buffer.
+    # Isomerate is short because production earns nothing under the cost
+    # objective, so the cheapest gallon in the book goes first, and no floor can
+    # conjure material the model declined to make. Anything measured at the 2%
+    # gap in normal use is smaller than the gap - compare at gap 0 or not at all.
+    safety_days = float(params.get("safety_stock_days", 0.0) or 0.0)
+
+    def safety_floor(p):
+        override = cfg.SAFETY_STOCK_GAL.get(p)
+        if override is not None:
+            return float(override)
+        # Sinks are disposal outlets, not products anyone protects: #6 oil and
+        # the cat cracker carry "demand" that is somewhere to put material.
+        if not safety_days or tanked[p].get("unlimited_offtake"):
+            return 0.0
+        served = sum(demand[p].values())
+        if served <= 0:
+            return 0.0
+        return safety_days * served / float(len(dates))
+
+    def safety_price(p):
+        """What a gallon-day below the floor costs.
+
+        Spread across the horizon and tied to the product's own lost sale, so a
+        gallon held below the floor for the *whole* window costs a fixed fraction
+        of shorting a customer once. That ordering has to hold at every price
+        level, which a flat figure cannot promise: the margins here run from
+        $0.50 to $6.00, and a penalty that outranks a lost sale would have the
+        model protecting stock by refusing orders - the exact failure
+        `terminal_shortfall_per_gal` was tuned away from.
+        """
+        return safety_fraction * lost_cost(p) / float(len(dates))
+
+    safety_fraction = float(params.get("safety_stock_penalty_fraction", 0.5) or 0.0)
+    below = {}
     for p in tanked:
-        v = pulp.LpVariable("term_{}".format(p), 0)
-        term_short[p] = v
-        prob += inv[(p, iso[-1])] + v >= tanked[p]["opening"], "term_{}".format(p)
+        floor_gal = safety_floor(p)
+        if floor_gal <= 0:
+            continue
+        for s in iso:
+            v = pulp.LpVariable("below_{}_{}".format(p, s), 0)
+            below[(p, s)] = v
+            prob += inv[(p, s)] + v >= floor_gal, "safe_{}_{}".format(p, s)
 
     # --------------------------------------------------------- day capacity
     # One time budget per unit, because a unit that changes over can only do one
@@ -797,26 +1017,93 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # a shared day would force the plant to choose between stages it runs
     # together - and once the reformer had a rate, that alone made the model
     # infeasible. Each vessel is still bounded by its own maximum rate.
-    for unit in {l["unit"] for l in lines}:
+    # A unit with two reactors owes a flush every time it starts one up, and the
+    # flush comes out of the same day. Nothing charged it before: the flush lives
+    # in the arc formulation, which only freed units get, so on a unit whose
+    # assignment is fixed **crossing reactors was free**. The hydrotreater duly
+    # crossed 17 times against the plan's 14, and ran both reactors on 5 days
+    # against the plan's 1 - because `HYDRO#76`, the diesel draw, is flow-through
+    # on R2 and may run on any day at no cost, including days R1 is running.
+    #
+    # Counting *start-ups* rather than same-day overlaps is what makes this
+    # faithful: only 1 of the plan's 14 crossings has both reactors inside one
+    # day, so the rest happen at a day boundary and a same-day test would miss
+    # thirteen of them.
+    #
+    # The setup state persists across idle days on purpose - a reactor still
+    # holds its last feed while the unit sits, so resuming the *same* reactor
+    # owes nothing and resuming the other still owes the flush. That is why an
+    # idle or outage day does not reset `was_on`.
+    reactor_flush = bool(params.get("charge_reactor_flush", True))
+    for unit in sorted({l["unit"] for l in lines}):
         if unit in cfg.CASCADE_UNITS:
             continue
         if unit in free:
             continue          # has a real time budget, above, with the arc loss
+        ulines = [l for l in lines if l["unit"] == unit]
+        rspec = cfg.UNIT_REACTORS.get(unit)
+        reactors = sorted({r for r in (cfg.reactor_of(unit, l["workbook_product"])
+                                       for l in ulines) if r}) if rspec else []
+        # One reactor cannot be crossed, and this is the only thing that adds
+        # binaries to v0 - so a unit that does not need them does not get them.
+        crossing = reactor_flush and rspec and len(reactors) > 1
+        flush_days = float(rspec["flush_days"]) if crossing else 0.0
+        was_on = {}
         for d, s in zip(dates, iso):
             if d in down.get(unit, set()):
                 continue
             terms = []
-            for line in [l for l in lines if l["unit"] == unit]:
+            by_reactor = defaultdict(list)
+            for line in ulines:
                 if (line["key"], s) not in chg:
                     continue
-                info = cfg.max_rate_info(unit, line["workbook_product"], line["key"])
+                info = line_rate(spec, unit, line["key"], line["workbook_product"])
                 if info:
-                    terms.append(chg[(line["key"], s)] * (1.0 / info["bbl"]))
-            if terms:
-                extra = slack("day_time", "{}_{}".format(unit, s))
-                prob += pulp.lpSum(terms) <= 1.0 + (
-                    extra if extra is not None else 0), \
-                    "day_{}_{}".format(unit, s)
+                    t = chg[(line["key"], s)] * (1.0 / info["bbl"])
+                    terms.append(t)
+                    by_reactor[cfg.reactor_of(unit, line["workbook_product"])].append(t)
+            if not terms:
+                continue
+            flush = []
+            if crossing:
+                # The unit is set up for exactly one reactor a day, and may only
+                # produce on the one it is set up for. The `<=` link alone is not
+                # enough and the first draft of this shipped with only that: an
+                # indicator bounded below by production and above by nothing can
+                # be switched on for free, so the model held both reactors "on"
+                # permanently, never registered a change, and paid no flush. It
+                # read as a 3-crossing regression that was really solver noise
+                # inside the 2% gap.
+                #
+                # Summing to one is what gives it teeth, and it is also the
+                # physics: the reactors are sequential on one train - the plan
+                # shows both on 1 running day in 91, which is a crossing caught
+                # mid-day rather than concurrency.
+                now = {r: pulp.LpVariable("ron_{}_{}_{}".format(unit, r, s),
+                                          cat="Binary") for r in reactors}
+                prob += pulp.lpSum(now.values()) == 1, \
+                    "ronly_{}_{}".format(unit, s)
+                for r in reactors:
+                    rt = by_reactor.get(r)
+                    if rt:
+                        # Time is already a fraction of a day, so 1 is the
+                        # tightest valid big-M and no looser one is needed.
+                        prob += pulp.lpSum(rt) <= now[r], \
+                            "ron_{}_{}_{}".format(unit, r, s)
+                if was_on:
+                    # One flush a day at most: with the setups summing to one, a
+                    # change turns exactly one reactor on and one off, so
+                    # charging per reactor would bill the same crossing twice.
+                    up = pulp.LpVariable("flush_{}_{}".format(unit, s), 0, 1)
+                    for r in reactors:
+                        prob += up >= now[r] - was_on[r], \
+                            "flush_{}_{}_{}".format(unit, r, s)
+                    flush.append(up)
+                was_on = now
+            extra = slack("day_time", "{}_{}".format(unit, s))
+            prob += pulp.lpSum(terms) + flush_days * pulp.lpSum(flush) <= 1.0 + (
+                extra if extra is not None else 0), \
+                "day_{}_{}".format(unit, s)
 
     # --------------------------------------------------- products per day
     # How many *different* feeds a unit may charge in one day. The time budget
@@ -1008,6 +1295,11 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
             - pulp.lpSum(v * lost_cost(p) for (p, s), v in lost.items())
             + pulp.lpSum(v * netback_of(p) for (p, s), v in sell.items())
             + pulp.lpSum(inv[(p, iso[-1])] * terminal_value_of(p) for p in tanked)
+            # Falling below safety stock is value given up under either
+            # objective, so it is subtracted here and added there - the same
+            # term, not a second policy.
+            - pulp.lpSum(v * safety_price(p) for (p, s), v in below.items())
+            - DRAIN_PENALTY * pulp.lpSum(drain.values())
             - pulp.lpSum(v * arc_cost.get(a, switch_cost)
                          for (a, s), v in arc.items())
             - pulp.lpSum(v for fam in slacks.values()
@@ -1025,6 +1317,8 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                          for (p, s), v in sell.items())
             + pulp.lpSum(v * terminal_cost_for(p)
                          for p, v in term_short.items())
+            + pulp.lpSum(v * safety_price(p) for (p, s), v in below.items())
+            + DRAIN_PENALTY * pulp.lpSum(drain.values())
             # Only what lost time does not already capture - labour, quality
             # giveaway, the interface that really is slopped off. The time itself
             # is paid for in the day budget, by the production it displaces.
@@ -1112,8 +1406,12 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     if res.status not in ("optimal", "feasible"):
         res.message = "solver returned {}".format(res.status)
         return res
+    if truncated:
+        res.message = ("horizon cut by {} day(s) to end {}, the last day the "
+                       "workbook's inputs can be believed; solving {} days. "
+                       .format(truncated, cfg.DATA_VALID_THROUGH, len(dates)))
     if res.status == "feasible":
-        res.message = ("stopped after {:.0f}s with a usable schedule that is "
+        res.message += ("stopped after {:.0f}s with a usable schedule that is "
                        "NOT proved optimal - the gap is unknown, and a longer "
                        "run has scored 20% better on this model"
                        .format(res.solve_seconds))
@@ -1138,6 +1436,8 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         if key and v > 1e-6:
             transfer[key][s] = v / GAL_PER_BBL
     res.transfer_bbl = transfer
+    res.inventory = {p: {s: float(inv[(p, s)].value() or 0.0) for s in iso}
+                     for p in tanked}
     res.lost_sales = {p: {s: float(lost[(p, s)].value() or 0.0) for s in iso
                           if (lost[(p, s)].value() or 0) > 1e-6}
                       for p in tanked}
@@ -1163,6 +1463,10 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                                       for v in term_short.values()),
         "charge_floor_fraction": floor,
         "days": len(dates),
+        #: Days cut off the end because they fall past `DATA_VALID_THROUGH`.
+        #: Non-zero means the answer covers less than was asked for, which a
+        #: report must say rather than quietly show a shorter plan.
+        "horizon_truncated_days": truncated,
         "products": len(tanked),
     }
 

@@ -44,9 +44,14 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
           horizon: Optional[List[dt.date]] = None,
           downtime: Optional[Dict[str, set]] = None,
           elastic: bool = False,
-          free_units: Optional[List[str]] = None) -> v0.OptimizeResult:
-    """Solve v1. Signature matches `v0.solve` so callers can swap one for the other."""
+          free_units: Optional[List[str]] = None,
+          **kw) -> v0.OptimizeResult:
+    """Solve v1. Signature matches `v0.solve` so callers can swap one for the other.
+
+    `**kw` carries the window state a rolling horizon hands in - opening tanks,
+    setup carry-in, whether this is the last window - straight through to v0.
+    """
     return v0.solve(ref, scn, spec, params, horizon=horizon, downtime=downtime,
                     elastic=elastic,
                     free_units=list(FREE_UNITS if free_units is None
-                                    else free_units))
+                                    else free_units), **kw)
