@@ -289,30 +289,117 @@ def test_no_per_unit_cost_reproduces_the_single_scalar(solved):
     assert same.objective == res.objective
 
 
-def test_pricing_one_unit_lengthens_that_unit(solved):
+#: Short on purpose - see `test_pricing_one_unit_lengthens_that_unit`.
+SHORT_DAYS = 14
+
+
+@pytest.fixture(scope="module")
+def short_horizon():
+    """A horizon small enough that both sides of the comparison prove optimality."""
+    from invplanner import model_config as cfg
+    from invplanner.engine import Reference, Scenario, simulate
+    from invplanner.modelprep import build
+
+    ref = Reference.load(os.path.join(SEED, "reference.json"))
+    scn = Scenario.load(os.path.join(SEED, "scenario.json"))
+    sim = simulate(ref, scn, physical=True)
+    dates = scn.dates[:SHORT_DAYS]
+    down = {u: cfg.turnaround_days(u) for u in cfg.TURNAROUNDS}
+    spec = build(ref, scn, sim, horizon=dates, downtime=down)
+    return ref, scn, spec, dates, down
+
+
+def test_pricing_one_unit_lengthens_that_unit(short_horizon):
     """The point of the whole change: a cost aimed at one unit reaches that unit.
 
-    Only MEK is asserted. Extraction is free to switch *more* - MEK holding a
-    campaign longer changes what arrives downstream, and relieving that is
-    exactly what the model is for - so pinning both would be pinning an emergent
-    shape rather than the mechanism."""
-    from invplanner import model_config as cfg
-    from invplanner.optimizer import v1
-    ref, scn, spec, dates, res = solved
-    down = {u: cfg.turnaround_days(u) for u in cfg.TURNAROUNDS}
+    **Both solves must prove optimality, and that is why this runs on 14 days
+    rather than the module's 42.** Pricing MEK's changeovers at $50k makes the
+    search much harder than the baseline's, and at 42 days it stops on the time
+    limit - so the comparison was a proved optimum against an unproven
+    incumbent, whose quality varies run to run. It passed at 12 switches against
+    6, then failed on the same code at 12 against 12, because an incumbent is
+    not a measurement. The defect was in this test, not the model: the
+    objectives are identical across those runs.
 
+    That only became visible once `sol_status` was read instead of PuLP's
+    rewritten `status` - before that the expensive run *claimed* to be optimal
+    and the comparison looked sound.
+
+    Only MEK is asserted. Extraction is free to switch more: MEK holding a
+    campaign changes what arrives downstream, and relieving that is what the
+    model is for, so pinning both would pin an emergent shape rather than the
+    mechanism.
+    """
+    from invplanner.optimizer import v1
+    ref, scn, spec, dates, down = short_horizon
+    params = dict(PARAMS, horizon_days=SHORT_DAYS, time_limit_seconds=300)
+
+    base = v1.solve(ref, scn, spec, params, horizon=dates, downtime=down)
     dear = v1.solve(ref, scn, spec,
-                    dict(PARAMS, switch_cost_by_unit={"MEK": 50_000.0}),
+                    dict(params, switch_cost_by_unit={"MEK": 50_000.0}),
                     horizon=dates, downtime=down)
-    # `feasible` and not `optimal`: pricing one unit's changeovers at $50k makes
-    # the search harder than the baseline's, and it stops on the time limit with
-    # an incumbent. That is the honest label now that `sol_status` is read rather
-    # than PuLP's rewritten `status` - this assertion said `optimal` until the
-    # rewrite was found, and it was never true.
-    #
-    # It only weakens the comparison in the safe direction. The baseline is a
-    # proved optimum and this is an incumbent, so a *better* schedule may exist
-    # for the expensive case - and a better one switches less, not more. The
-    # margin is 12 against 6 either way.
-    assert dear.status in ("optimal", "feasible"), dear.status
-    assert _switches(dear, "MEK") < _switches(res, "MEK")
+
+    assert base.status == "optimal", base.status
+    assert dear.status == "optimal", dear.status
+    assert _switches(dear, "MEK") < _switches(base, "MEK")
+
+
+# ------------------------------------------------------- v2: the hydrotreater
+@pytest.fixture(scope="module")
+def v2_solved(solved):
+    """One v2 solve shared by both tests - it costs about a minute on its own."""
+    from invplanner import model_config as cfg
+    from invplanner.optimizer import v0, v2
+    ref, scn, spec, dates, _ = solved
+    down = {u: cfg.turnaround_days(u) for u in cfg.TURNAROUNDS}
+    params = dict(PARAMS, time_limit_seconds=300)
+    first = v0.solve(ref, scn, spec, params, horizon=dates, downtime=down,
+                     free_units=["MEK", "EXTRACT"])
+    both = v2.solve(ref, scn, spec, params, horizon=dates, downtime=down)
+    return first, both, spec, dates
+
+def test_v2_frees_all_three_units_and_both_stages_prove_optimality(v2_solved):
+    """Freeing all three at once does not finish; freeing them in turn does.
+
+    Measured before this was written: the joint model proves optimality only over
+    7 days (116 s) and times out at 10, 14, 21 and 42. Seven days is shorter than
+    a single ROSE campaign, so a rolling horizon built on it would decide a
+    40-day campaign a week at a time - which is why the decomposition is by unit
+    and not by time.
+
+    Three things were tried and did not fix it, so nobody repeats them: relaxing
+    the arcs to continuous (correct, and kept, but not sufficient), a real
+    changeover cost on the hydrotreater (cuts its switching 9 -> 6 and still
+    cannot close the gap), and a shorter horizon.
+    """
+    res = v2_solved[1]
+    assert res.status == "optimal", (res.status, res.message)
+    assert set(res.schedule) == {"MEK", "EXTRACT", "HYDRO"}, sorted(res.schedule)
+
+    stages = res.kpis["stages"]
+    assert [s["units"] for s in stages] == [["MEK", "EXTRACT"], ["HYDRO"]]
+    assert all(s["status"] == "optimal" for s in stages), stages
+
+    # ...and the guarantee on offer is named, because "optimal" on a two-stage
+    # solve means something weaker than it does on a single one.
+    assert res.kpis["globally_optimal"] is False
+    assert "not a joint optimum" in res.message
+
+
+def test_v2_hands_stage_one_on_untouched(v2_solved):
+    """Stage two is *pinned* to stage one's schedule, not floored at it.
+
+    Left to the charge floor, stage two could take 70% of stage one's decision
+    back and the two answers would not compose into one schedule. Pinned with a
+    hair of tolerance rather than a flat equality: stage one drains 9302 to
+    exactly zero, and an exact pin makes the balance infeasible by a margin the
+    elastic diagnostic reports as literally zero.
+    """
+    first, both, spec, dates = (v2_solved[0], v2_solved[1],
+                                v2_solved[2], v2_solved[3])
+    iso = [d.isoformat() for d in dates]
+    for unit in ("MEK", "EXTRACT"):
+        for line in [l for l in spec.charge_lines if l["unit"] == unit]:
+            a = sum(first.charge.get(line["key"], {}).get(s, 0.0) for s in iso)
+            b = sum(both.charge.get(line["key"], {}).get(s, 0.0) for s in iso)
+            assert b == pytest.approx(a, rel=1e-4), (line["key"], a, b)

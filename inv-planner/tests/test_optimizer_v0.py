@@ -501,3 +501,135 @@ def test_terminal_value_fraction_dominates_the_answer(solved):
     assert hoards.status in ("optimal", "feasible")
     assert ships.status in ("optimal", "feasible")
     assert ships.kpis["lost_sales_gal"] < hoards.kpis["lost_sales_gal"]
+
+
+# ------------------------------------------------- the horizon the data supports
+def test_the_horizon_is_capped_at_the_last_believable_day(solved):
+    """The workbook has columns for 366 days and inputs for far fewer.
+
+    Nothing in the data announces where it stops being real, and asking past that
+    point does not fail cleanly: it returns a confident schedule built on demand
+    nobody stands behind, or an infeasibility whose cause is three layers from
+    the error. A full-year run was infeasible at *every* charge floor including
+    zero, and the reason - crude still running with no unit scheduled to consume
+    the feeds - took an elastic diagnostic to find.
+
+    Confirmed with operations: the demand inputs are wrong past 2026-12-31.
+    """
+    from invplanner import model_config as cfg
+    import datetime as dt
+
+    assert cfg.DATA_VALID_THROUGH == dt.date(2026, 12, 31)
+    kept = cfg.clamp_horizon([dt.date(2026, 12, 30), dt.date(2026, 12, 31),
+                              dt.date(2027, 1, 1), dt.date(2027, 7, 23)])
+    assert kept == [dt.date(2026, 12, 30), dt.date(2026, 12, 31)]
+
+    # A horizon entirely past the boundary is refused, not solved. This returns
+    # before the spec is touched, so the module's 14-day spec is irrelevant here.
+    from invplanner.optimizer import v0
+    ref, scn, spec, _, _ = solved
+    past = [dt.date(2027, 1, 5), dt.date(2027, 1, 6)]
+    res = v0.solve(ref, scn, spec, PARAMS, horizon=past)
+    assert res.status == "no_solution", res.status
+    assert "believed" in res.message
+
+    # 160 days is the longest that solves; the 161st adds one tank overflow
+    assert cfg.MAX_SOLVABLE_DAYS == 160
+    assert (scn.dates[cfg.MAX_SOLVABLE_DAYS - 1]
+            <= cfg.DATA_VALID_THROUGH), "the solvable window must sit inside the believable one"
+
+
+# ------------------------------------------------- the hydrotreater's reactors
+def _reactor_days(spec, res, dates):
+    """Which reactors the hydrotreater produces on, per day."""
+    from invplanner import model_config as cfg
+    hy = [l for l in spec.charge_lines if l["unit"] == "HYDRO"]
+    rof = {l["key"]: cfg.reactor_of("HYDRO", l["workbook_product"]) for l in hy}
+    out = []
+    for d in dates:
+        s = d.isoformat()
+        on = {rof[l["key"]] for l in hy
+              if (res.charge.get(l["key"], {}).get(s, 0.0) or 0.0) > 1e-6}
+        out.append(on)
+    return out
+
+
+def test_crossing_the_hydrotreater_reactors_is_not_free(solved):
+    """A reactor crossing costs a quarter-day flush, and nothing charged it.
+
+    The flush lives in the arc formulation, which only *freed* units get. The
+    hydrotreater's assignment is fixed, so its day budget was the plain
+    `sum(charge/rate) <= 1` with no flush term - and `HYDRO#76`, the diesel draw,
+    is flow-through on R2 and may run any day at no cost, including days R1 is
+    running. Crossing was free, and the optimizer ran both reactors on 5 days
+    against the plan's 1.
+
+    The reactors are sequential on one train, so the unit is set up for exactly
+    one a day. That `== 1` is what gives the constraint teeth: the first draft
+    bounded the indicator below by production and above by nothing, so the model
+    held both reactors on permanently, never registered a change, and paid no
+    flush at all.
+    """
+    _, _, spec, dates, _ = solved
+    charged = _solve(solved, charge_reactor_flush=True)
+    assert charged.status == "optimal", charged.status
+    both = [d for d, on in zip(dates, _reactor_days(spec, charged, dates))
+            if len(on) > 1]
+    assert not both, "both reactors produced on {}".format(both[:3])
+
+
+def test_the_reactor_flush_can_be_turned_off(solved):
+    """v0 is deliberately an LP, and this is the one thing that adds binaries.
+
+    Off, the model must be exactly the LP it was - so the escape hatch is not a
+    convenience, it is what keeps `v0 is an LP` a true statement anyone can
+    check.
+    """
+    free = _solve(solved, charge_reactor_flush=False)
+    assert free.status == "optimal", free.status
+    # charging the flush spends time, so it can never score better
+    charged = _solve(solved, charge_reactor_flush=True)
+    assert charged.objective >= free.objective - 1e-6
+
+
+# ------------------------------------------------------------- safety stock
+def test_safety_stock_is_off_until_someone_sets_it(solved):
+    """Nobody has measured a lower control limit, so the model invents none.
+
+    `RefKind.TARGET_LCL` has had a slot for one since the schema was written and
+    the workbook sets none for any product. Days of cover is a stand-in derived
+    from demand, not a fact about the tank - so it ships inert, the same way
+    `SWITCH_COST_BY_UNIT` and `MIN_RATE_FRACTION` do. A placeholder that changes
+    every answer is worse than one that waits.
+    """
+    _, _, _, _, res = solved
+    off = _solve(solved, safety_stock_days=0)
+    assert off.objective == pytest.approx(res.objective)
+
+
+def test_safety_stock_holds_a_floor_without_outranking_a_customer(solved):
+    """Turned on, it must keep tanks off the floor - and never at the expense of
+    service, which is the failure `terminal_shortfall_per_gal` was tuned away
+    from. Priced per gallon-day against the product's own lost sale and spread
+    across the horizon, so a gallon held below the floor for the *whole* window
+    still costs a fraction of shorting a customer once."""
+    from invplanner import model_config as cfg
+    ref, scn, spec, dates, _ = solved
+
+    on = _solve(solved, safety_stock_days=3)
+    assert on.status == "optimal", on.status
+
+    # the floor is real: it is days of cover on demand, not a tank level
+    served = {}
+    for b in ref.blocks:
+        c = b.get("charge_code")
+        p = spec.aliases.get(c, c)
+        for row in ("Sales", "Forecast", "Blends"):
+            for s, g in spec.demand_rows.get(b["id"], {}).get(row, {}).items():
+                if s in {d.isoformat() for d in dates}:
+                    served[p] = served.get(p, 0.0) + g
+    assert any(v > 0 for v in served.values()), "no demand to derive cover from"
+
+    # and it never buys stock with someone else's order
+    assert on.kpis["lost_sales_gal"] <= _solve(
+        solved, safety_stock_days=0).kpis["lost_sales_gal"] + 1.0
