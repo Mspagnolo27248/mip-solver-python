@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..engine import simulate
 from ..modelprep import build
-from ..optimizer import v0, v1, verify
+from ..optimizer import v0, v1, v2, verify
 from . import service as svc
 from .models import (AuditEvent, OptimizerParams, OptimizerRun, Scenario,
                      ScheduleEntry)
@@ -29,7 +29,8 @@ def active_params(db: Session) -> OptimizerParams:
 FIELDS = ["crude_price_per_bbl", "downgrade_discount_per_gal",
           "lost_sale_margin_per_gal", "netback_diesel_per_gal",
           "netback_gasoline_per_gal", "switch_cost", "switch_cost_by_unit",
-          "objective", "terminal_value_fraction", "charge_floor_fraction",
+          "objective", "terminal_value_fraction", "safety_stock_days",
+          "charge_floor_fraction",
           "terminal_shortfall_per_gal", "model_version", "horizon_days",
           "time_limit_seconds", "mip_gap"]
 
@@ -77,14 +78,26 @@ LABELS = {
         "it to zero and every tank has to be empty on the final day. It moves "
         "lost sales by a factor of five, so treat any single run as one point "
         "on a curve."),
+    "safety_stock_days": (
+        "Safety stock", "days of cover",
+        "Days of demand each product keeps in tank. The only floor under "
+        "inventory the model has - the workbook's lower control limits are not "
+        "read by the optimizer - so at zero a tank may sit empty for weeks and "
+        "break no rule. Leave it at zero unless you want it: measured at 0 "
+        "through 7 days the schedule does not change, and it roughly doubles "
+        "solve time for each 3 days of cover. It is derived from demand, not a "
+        "figure set per product."),
     "charge_floor_fraction": ("Charge floor", "fraction of plan",
                               "How much of your own charge each unit must still "
-                              "run. The objective only counts costs, so with no "
-                              "floor the cheapest schedule is to stop making "
-                              "oil. 1.0 pins charges to the plan and optimises "
-                              "routing alone - but 1.0 is infeasible on the "
-                              "current plan, which asks units to charge feed "
-                              "that is not there."),
+                              "run. The cost objective never rewards production, "
+                              "so with no floor the cheapest schedule is to stop "
+                              "making oil. The feasible ceiling depends on the "
+                              "horizon - 0.75 to 60 days, 0.50 to 160, and the "
+                              "full year is infeasible at any floor because the "
+                              "charge schedule ends 2026-12-31. 0.30 holds "
+                              "everywhere, and raising it changes almost "
+                              "nothing: at 100 days 0.30 and 0.50 lose the same "
+                              "gallons."),
     "terminal_shortfall_per_gal": (
         "End-of-window shortfall", "$/gal",
         "What ending below opening inventory costs. Material to replace, not "
@@ -93,11 +106,13 @@ LABELS = {
         "level, the model cannot tell shorting a customer from drawing a tank "
         "down; set close, it shorts customers to hold stock."),
     "model_version": (
-        "Model", "v0 or v1",
+        "Model", "v0, v1 or v2",
         "v0 keeps your charge assignments and optimises only how much and where "
-        "the overflow goes. v1 also decides what the MEK and extraction units "
-        "charge each day, on the transitions those units are allowed. v0 solves "
-        "in about a second, v1 in about ten."),
+        "the overflow goes. v1 also decides what MEK and extraction charge each "
+        "day. v2 adds the hydrotreater, solved in two stages because freeing all "
+        "three at once does not finish - each stage is proved optimal, the pair "
+        "is not a joint optimum. Over 100 days: v0 seconds, v1 a couple of "
+        "minutes, v2 about five."),
     "horizon_days": ("Detailed horizon", "days",
                      "Firm orders cover about 57 days; beyond that demand is "
                      "pure forecast."),
@@ -167,7 +182,9 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner"
             solver_params["netback_gasoline_cost_per_gal"] = max(
                 0.0, (p.crude_price_per_bbl / 42.0) - p.netback_gasoline_per_gal)
 
-        model = v1 if (p.model_version or "v1") == "v1" else v0
+        # v2 is a two-stage solve, not a bigger one - see optimizer/v2.py for
+        # why freeing all three units at once does not finish.
+        model = {"v0": v0, "v1": v1, "v2": v2}.get(p.model_version or "v1", v1)
         result = model.solve(ref, escn, spec, solver_params, horizon=dates,
                              downtime=downtime)
         run_row.params = dict(payload, model_version=p.model_version)

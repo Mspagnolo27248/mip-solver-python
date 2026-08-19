@@ -393,6 +393,20 @@ class OptimizerParams(Base):
     #: the cost objective did, to hold stock.
     terminal_value_fraction = Column(Float, default=0.25, nullable=False)
 
+    #: Days of demand cover each product must keep in tank, elastic.
+    #:
+    #: **The only lower bound on inventory the model has.** Everything else about
+    #: a tank is the ceiling: `0 <= inventory <= capacity`, plus a terminal
+    #: condition on the last day. The workbook's lower control limits are not
+    #: read by the optimizer at all, so without this a tank may sit empty for
+    #: weeks and satisfy every constraint.
+    #:
+    #: Off at zero, and measured that way on purpose: at 0 through 7 days of
+    #: cover the answer is bit-identical, and turning it on costs 129s -> 293s ->
+    #: 556s at 0/3/5 days for that identical answer. Days of cover is a stand-in
+    #: derived from demand, not a figure anyone has set per product.
+    safety_stock_days = Column(Float, default=0.0, nullable=False)
+
     #: `{unit: $ per changeover}`, overriding `switch_cost` for the units named.
     #:
     #: Null means every unit uses the scalar, which is how the model priced
@@ -417,19 +431,39 @@ class OptimizerParams(Base):
     #: shut the Platformer off entirely and ran the plant at 34% of plan. 1.0
     #: pins charges to the schedule and optimises routing alone.
     #:
-    #: **The feasible range ends at 0.75.** Measured over 42 days, under both
-    #: objectives: 0.30 through 0.75 solve to proven optimal, 0.80 and above are
-    #: infeasible - the plan asks units to charge feed that is not there, so
-    #: obliging the model to reproduce more than three quarters of it cannot be
-    #: done. The default was 0.8 and therefore infeasible on every run, which
-    #: went unnoticed because the solver's `Infeasible` was being relabelled
-    #: `feasible` and a schedule handed back anyway (fixed in `optimizer/v0.py`).
-    charge_floor_fraction = Column(Float, default=0.75, nullable=False)
+    #: **The feasible ceiling depends on the horizon**, so this cannot be set
+    #: without knowing `horizon_days`. Measured under both objectives:
+    #:
+    #:      42 days   floor <= 0.75
+    #:      60 days   floor <= 0.75
+    #:     100 days   floor <= 0.50
+    #:     160 days   floor <= 0.50
+    #:     366 days   infeasible at every floor, including 0.00
+    #:
+    #: 0.30 because it is the only value that holds across every horizon anyone
+    #: runs, and because raising it buys nothing: at 100 days, 0.30 against 0.50
+    #: charges 1,417,480 bbl against 1,416,167 and loses exactly the same
+    #: 3,030,265 gal. The floor stops being binding well below the ceiling.
+    #:
+    #: The full year fails for a reason that is not this parameter: **the
+    #: planner's charge schedule ends 2026-12-31**, about 161 days into a
+    #: 366-day scenario, for MEK, extraction, ROSE and the hydrotreater. Crude
+    #: is a fixed input and keeps running, so past that date the feeds pile up
+    #: with nothing consuming them and the tanks overflow - 9117 alone by
+    #: 9.8 M gal/day. The model is only meaningful out to roughly 160 days,
+    #: which is what the reports in `data/reports` were built at.
+    #:
+    #: The default was 0.8, infeasible on every horizon, and it went unnoticed
+    #: because the solver's `Infeasible` was being relabelled `feasible` and a
+    #: schedule handed back anyway (fixed in `optimizer/v0.py`).
+    charge_floor_fraction = Column(Float, default=0.30, nullable=False)
 
     #: Which model runs. "v0" fixes the planner's assignments and optimises
     #: levels and routing only; "v1" also decides what MEK and extraction charge,
     #: on the allowed transitions. v0 solves in about a second and v1 in about
     #: ten - see V1-MODEL.md for why proving optimality is not worth its cost.
+    #: "v0", "v1" or "v2". v2 frees the hydrotreater as well, in two stages -
+    #: freeing all three units at once cannot prove optimality past seven days.
     model_version = Column(String(8), default="v1", nullable=False)
 
     # --- solve

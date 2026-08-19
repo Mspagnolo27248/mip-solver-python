@@ -21,6 +21,7 @@ ADDED_COLUMNS = [
     ("optimizer_params", "objective", "VARCHAR(8) NOT NULL DEFAULT 'cost'"),
     ("optimizer_params", "terminal_value_fraction",
      "FLOAT NOT NULL DEFAULT 0.25"),
+    ("optimizer_params", "safety_stock_days", "FLOAT NOT NULL DEFAULT 0.0"),
 ]
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),

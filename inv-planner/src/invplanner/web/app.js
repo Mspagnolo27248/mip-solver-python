@@ -930,8 +930,9 @@ async function loadOptParams() {
       'downgrade_discount_per_gal', 'netback_diesel_per_gal',
       'netback_gasoline_per_gal', 'switch_cost',
       'terminal_shortfall_per_gal']],
-    ['How much freedom the model has', ['model_version',
-      'charge_floor_fraction', 'horizon_days']],
+    ['How much freedom the model has', ['model_version', 'objective',
+      'charge_floor_fraction', 'terminal_value_fraction', 'safety_stock_days',
+      'horizon_days']],
     ['Solver', ['time_limit_seconds', 'mip_gap']],
   ];
   const byField = Object.fromEntries(d.schema.map((f) => [f.field, f]));
