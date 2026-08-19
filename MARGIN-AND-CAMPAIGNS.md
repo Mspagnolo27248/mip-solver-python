@@ -62,19 +62,38 @@ the acceptance test in section 7.
 
 ---
 
-## 3. Step 1 — prices
+## 3. Step 1 — prices — **already done**
 
-Netbacks in $/gal for the **11 products that carry 80% of demand**, plus the four
-sinks (`MARGIN-OBJECTIVE.md:100-117`). Start there rather than waiting for a
-complete list of 27.
+This section spent a long time describing work that had been finished before it was
+written, and several later sections were built on that mistake. The prices are in.
 
-The ratios matter more than the levels. A uniform error in every netback changes
-the reported profit and not the schedule; an error in one product *relative to the
-others* changes the schedule. So an approximate number for all eleven beats an
-exact number for three.
+`data/netbacks.json` carries **32 gross-profit figures supplied by operations**,
+captured 2026-08-13 from `netbacks.xlsx`, keyed by *sales* code and translated to
+the production codes the model tracks. Its own `missing` list is empty, and it is
+right to be:
 
-Two sinks (#6 oil, cat cracker) are currently modelled as crude less $0.50. Diesel
-and gasoline have never had a price at all.
+| | |
+|---|---|
+| tanked products priced | **32** |
+| tanked products unpriced | 10 — every one carries **zero demand** |
+| demand with a real price behind it | **100%** of the real book |
+
+The ten unpriced products are exactly the streams operations confirmed cannot be
+sold: the waxy neutrals 9117/9118/9119, the dewaxed oils 9302/9303/9305, deep
+extract 9705, and three waxes with no demand. Unpriced is the correct answer for
+them, not a gap.
+
+Two demand codes have no price and should not have one. `DDDD` (5.5 M gal) is the
+*derived* finished-diesel pool — the sum of ten grades the model deliberately
+collapses into `DSL`, so pricing it would double count the same material. `9202`
+(1.2 M gal) is retired: nothing can make it and demand is still booked against it.
+Both exclusions are deliberate and documented in `data/reports/model-spec.md`.
+
+**So the margin objective has been running on real operations netbacks all along**,
+including every measurement in sections 5 and 5c. Those results are stronger than
+they were presented as - the throughput gain is measured against real prices, not
+placeholders. What is *not* settled is `terminal_value_fraction`, which is not a
+price at all (section 5c), and the reprice-the-baseline check below.
 
 ---
 
@@ -112,9 +131,10 @@ guardrail, it is a fourth objective nobody designed.
 survives and is the one to lean on: score the planner's own schedule under the new
 objective and show finance revenue, crude bill and margin. An implausible absolute
 margin means the netbacks are wrong, and that is far easier to see in dollars than
-in gallons. It needs real prices, so it cannot run early — which means **the flip
-cannot be validated before the netbacks arrive** after all. Step 1 is on the
-critical path in a way this document previously denied.
+in gallons. It needs real prices — which exist (section 3), so **this check can run now.**
+It is the last thing standing between the margin objective and being believed, and
+it needs no new data, only the scoring code to report revenue, crude bill and
+margin separately.
 
 ---
 
@@ -229,10 +249,65 @@ The blast radius:
   everything from 0.80 up; only the 1.0 case had been noticed, because that was the
   one someone tried deliberately.
 
-**The feasible range**, measured under both objectives: **0.30 through 0.75 solve
-to proven optimal; 0.80 and above are infeasible.** The plan asks units to charge
-feed that is not there, so obliging the model to reproduce more than three quarters
-of it cannot be done. The default is now 0.75.
+**The feasible ceiling is a function of the horizon**, which a single default
+cannot express. Measured under both objectives:
+
+| horizon | highest feasible charge floor |
+|---:|---|
+| 42 days | 0.75 |
+| 60 days | 0.75 |
+| 100 days | **0.50** |
+| 160 days | **0.50** |
+| 366 days | **none — infeasible at every floor, including 0.00** |
+
+The default is **0.30**, the only value that holds everywhere. Raising it buys
+nothing in the bargain: at 100 days, 0.30 against 0.50 charges 1,417,480 bbl
+against 1,416,167 and loses exactly the same 3,030,265 gal. The floor stops
+binding well below the ceiling, so the headroom is not worth spending.
+
+### The horizon is bounded by the data, and it is now enforced in code
+
+366 days is infeasible at a floor of *zero*, so the floor is not the cause. The
+elastic diagnostic names it immediately: **tank capacity**, 967 violations, worst
+of them 9117 waxy medium neutral overflowing by 9.8 M gal/day.
+
+The cause is upstream of the model. **The planner's charge schedule ends
+2026-12-31** — for MEK, extraction, ROSE and the hydrotreater alike — about 161
+days into a 366-day scenario. Only the Platformer is scheduled beyond it. Crude is
+a fixed input and keeps running, so past that date the side streams keep arriving
+with no unit charging them, and the feed tanks fill until they burst. 9117 is one
+of the products operations confirmed has no outlet at all, so nothing can relieve
+it.
+
+**Confirmed with operations: the demand inputs are wrong past 2026-12-31.** So the
+366-day numbers above were never a finding about the model — they were the model
+answering a question the workbook cannot support. Nothing in the data announces
+that boundary: the workbook has columns for all 366 days, and three different
+things end at three different points.
+
+| ends | what |
+|---|---|
+| 2026-10-15 | last firm Open Order — 57 days; forecast beyond |
+| **2026-12-31** | **last day the planner filled in a charge — the boundary** |
+| 2027-07-17 | extent of the Charge Schedule date columns |
+
+Enforced now in code rather than remembered: `DATA_VALID_THROUGH` in
+`model_config`, applied in `v0.solve` where every caller passes through. A horizon
+that runs past it is cut back and the result says so
+(`kpis["horizon_truncated_days"]`); one entirely past it is refused outright.
+Silent truncation is normally the wrong instinct, but the alternative here is a
+confident schedule built on demand nobody stands behind.
+
+**The practical limit is two days shorter: 160 days, ending 2026-12-29.** The 161st
+is infeasible for a far smaller reason than the full-year case — the elastic
+diagnostic returns exactly *one* violation, 9103 platformer charge overflowing its
+tank by 81,759 gal on 2026-12-30. An edge-of-window effect on a single product, not
+a structural break, and worth knowing before anyone hunts for a deep cause. It is
+also why every report in `data/reports` is named `*-160`: the edge was found
+empirically long before it was explained.
+
+Within that window, floors of 0.30 and 0.50 both solve to proven optimal at every
+horizon up to 160 days.
 
 Fixed by gating on the solver's status rather than on whether variables have
 numbers — only CBC's "not solved" means "stopped early with something worth
@@ -367,6 +442,100 @@ rolling horizon or a safety stock per product — which is what
 
 ---
 
+## 5d. Tanks running to empty — a floor exists now, and it is off
+
+Reported from a run: the model runs finished goods to empty. It does, and the
+first job was working out which part of that is the optimizer's doing. Scored per
+*block* it looks enormous — DSL alone shows 7.1 M gal lost and 801 days at zero —
+but that is an artefact: the model pools ten diesel grades into `DSL` while the
+simulator keeps the blocks apart, so demand sits on members with no production.
+
+In **model space** it is smaller and confined to three products:
+
+| product | lost | of demand | plan loses | verdict |
+|---|---:|---:|---:|---|
+| 9511 Platformate | 1,785,644 | 7,500,000 | **7,500,000** | data gap; optimizer *improves* it 76% |
+| DSL finished diesel | 999,640 | 7,100,000 | — | genuine |
+| 1128 Isomerate | 244,981 | 2,500,000 | **0** | genuine, and the optimizer's own |
+
+9511 needs no model change: the plan makes *zero* platformate because the reformer
+row was never carried in the workbook, and the optimizer runs the flow-through line
+and cuts the loss by three quarters. That is a data gap the model is already
+papering over.
+
+**The root cause of the rest: nothing constrains the path.** The terminal condition
+pins the last day against the first and says nothing about the 98 in between, so a
+tank may sit at zero for weeks and satisfy every constraint. Isomerate spent 41 of
+100 days empty because at $0.50/gal it is the cheapest thing in the book to short.
+
+### What was built
+
+A per-product minimum inventory, elastic, priced per gallon-day at a fraction of
+that product's **own** lost sale and spread across the horizon — so a gallon held
+below the floor for the entire window still costs less than shorting a customer
+once. That ordering has to hold at every price level, which a flat figure cannot
+promise when margins run from $0.50 to $6.00; it is the same failure
+`terminal_shortfall_per_gal` was tuned away from.
+
+Elastic is not a preference here. 9511 has no production at all in this data, so a
+hard floor on it would make the model infeasible for a reason with nothing to do
+with the schedule.
+
+The floor is **days of cover on measured demand**, because that is the honest shape
+of what is known — `RefKind.TARGET_LCL` has had a slot for a real lower control
+limit since the schema was written and the workbook sets none for any product.
+`SAFETY_STOCK_GAL` overrides per product so the first real figure can land without
+waiting for the rest.
+
+### It ships off, and the measurement says why
+
+Measured as **exact LP optima** — no freed units, reactor flush off, `mip_gap` 0 —
+because at the 2% gap in normal use every difference this knob makes is smaller
+than the gap itself. An earlier pass through this section reported that two days
+of cover "recovered 43,705 gal of diesel". **That was gap noise and it is
+withdrawn.** Solved exactly:
+
+| days of cover | 42 days | 100 days |
+|---:|---|---|
+| 0 | 1,178,108 | 3,030,265 |
+| 2 | 1,178,108 | 3,030,265 |
+| 3 | 1,178,108 | 3,030,265 |
+| 5 | 1,178,108 | 3,030,265 |
+| 7 | 1,194,341 (**+16,233**) | 3,030,265 |
+
+Bit-identical everywhere except one cell, and that cell is the constraint making
+things *worse* — seven days of cover at 42 days creates 16,233 gal of lost
+isomerate, because stock held is stock not shipped.
+
+**So as priced, the floor changes nothing.** It is soft, and its penalty is
+deliberately far below a lost sale, so the model simply absorbs the penalty rather
+than rearranging the plan. Making it bite would mean either a hard floor — which
+9511 cannot survive, having no production at all — or a penalty that outranks
+service, which is precisely the failure this pricing was designed to avoid.
+
+That is a real result rather than a disappointing one: **the tanks are not empty
+for want of a buffer.** 1128 is short because the model *chooses to make less
+isomerate* — production earns nothing under the cost objective, so the cheapest
+gallon in the book is the first to go. No inventory floor can conjure material the
+model declined to produce. The fix is section 5's margin objective, not this one.
+
+The mechanism is kept because it is correct and will matter the moment a real
+lower control limit exists, or someone wants a hard floor on a product that can
+support one. It ships inert, exactly as `SWITCH_COST_BY_UNIT`, `SAFETY_STOCK_GAL`
+and `MIN_RATE_FRACTION` do. It also costs real solve time when on. On the live
+model at 100 days, for a bit-identical answer each time — same total, same
+per-product split:
+
+| days of cover | lost sales | solve |
+|---:|---:|---:|
+| 0 | 3,030,265 | 129 s |
+| 3 | 3,030,265 | 293 s |
+| 5 | 3,030,265 | **556 s** |
+
+Four times the search to arrive back where it started.
+
+---
+
 ## 6. Step 4 — the brake
 
 Three levers. Two are built, one has never been switched on.
@@ -484,6 +653,103 @@ Extraction switching *more* is the mechanism working, not a defect: MEK holding 
 campaign changes what arrives downstream, and relieving that is what the model is
 for. A global scalar cannot produce this — it moves both units together.
 
+### Crossing the hydrotreater's reactors was free — **fixed**
+
+Reported from a run: the hydrotreater switches between its two reactors too much.
+It did, and the cause was the same shape as the changeover cost — a real cost that
+existed everywhere except in the model.
+
+A reactor crossing costs a **0.25-day flush**, measured and confirmed. But the
+flush lives in the arc formulation, and **only freed units get that.** The
+hydrotreater's assignment is fixed, so its day budget was the plain
+`Σ charge/rate ≤ 1` with no flush term at all. Crossing cost nothing.
+
+Compounding it, `HYDRO#76` — the diesel charge draw — is flow-through on **R2**,
+so it may run on any day between zero and its ceiling, including days R1 is
+running. The model took that freedom at no charge:
+
+| | reactor start-ups | days running both |
+|---|---:|---:|
+| plan | 13 | 1 |
+| before | 13 | **5** |
+| **after** | **13** | **0** |
+
+Lost sales are identical at 3,030,265 gal, so **the discipline costs nothing in
+service** — it was pure waste.
+
+**Start-ups, not same-day overlaps, are what to charge.** Only 1 of the plan's 13
+crossings has both reactors inside one day; the rest happen at a day boundary, so a
+same-day test would miss twelve of them.
+
+**The `== 1` is what gives it teeth**, and this is worth recording because the first
+attempt shipped without it. An indicator bounded below by production and above by
+nothing can be switched on for free, so the model simply held both reactors "on"
+permanently, never registered a change, and paid no flush. It read as a
+3-crossing *regression* that was really solver noise inside the 2% gap — a
+constraint that looks present, costs binaries, and does nothing.
+
+Two things this is not. It forbids running both reactors in one day, which the plan
+does once in 91 — the same class of approximation as "at most one changeover a day"
+already accepted for freed units, and it should be stated rather than discovered.
+And it makes v0 a MIP on any unit with two reactors, which is why
+`charge_reactor_flush` exists: off, v0 is exactly the LP it was, so "v0 is an LP"
+stays a claim anyone can check.
+
+### v2: the hydrotreater schedules itself, in two stages — **built**
+
+Freeing all three units at once does not solve. Measured, `mip_gap` 0.02:
+
+| horizon | all three | MEK+EXTRACT | HYDRO alone |
+|---:|---|---|---|
+| 7 d | optimal, 116 s | | |
+| 10 d | **no proof** | | |
+| 14 d | **no proof** | | |
+| 21 d | **no proof** | optimal, 9 s | optimal, 159 s |
+| 42 d | **no proof** | optimal, 11 s | optimal, 47 s |
+| 100 d | | optimal, 130 s | optimal, 170 s |
+
+Seven days is the largest window the joint model can prove, and that is useless —
+shorter than a single ROSE campaign, so a rolling horizon built on it would decide
+a 40-day campaign a week at a time. **That is why the decomposition is by unit and
+not by time.**
+
+The hydrotreater is the hard one for a reason the data already said: 7 charge lines
+against MEK's and extraction's 4, 42 transitions against their 6 and 9, and — unlike
+them — no minimum campaign anywhere, because every one of its charges is observed
+running for a single day. There is nothing to prune the tree with.
+
+**Three things tried that did not fix it**, recorded so nobody repeats them:
+
+- **Relaxing the arcs to continuous.** Correct and kept: the setups sum to one and
+  the arcs carry flow between two unit vectors, so a vertex is already integral —
+  confirmed by 2,394 arcs returning none fractional. It removes ~80% of the
+  binaries and still does not make v2 provable.
+- **A real changeover cost on the hydrotreater.** Does its job — switches fall 9 → 6
+  over 14 days — and the gap still will not close.
+- **A shorter horizon.** Only 7 days proves, which is not a horizon.
+
+**What works: solve the cheap units, hold their answer, then solve the
+hydrotreater against it.**
+
+| | 42 days | 100 days |
+|---|---|---|
+| stage 1 — MEK + EXTRACT | optimal, 9.6 s | optimal, 241 s |
+| stage 2 — HYDRO, pinned to stage 1 | optimal, 61 s | optimal, 430 s |
+| **total** | **71 s** | **677 s** |
+| objective against v1 | 2,784,182 → **2,675,894** (−3.9%) | 8,165,785 → **8,074,551** (−1.1%) |
+
+Stage two is **pinned** to stage one, not floored at it — the charge floor would let
+it take 70% of a settled decision back and the two answers would not compose. Pinned
+with a hair of tolerance rather than a flat equality: stage one drains 9302 to
+exactly zero on 2026-08-02, and an exact pin makes the balance infeasible by a margin
+the elastic diagnostic reports as literally **zero**.
+
+**The guarantee is named, because it is weaker than the word suggests.** Each stage
+is optimal *given the other's decisions*; the pair is not a joint optimum, and
+`kpis["globally_optimal"]` says so on every result. The joint upper bound that would
+measure the gap is not obtainable at any horizon worth planning — so the choice is
+not between this and the true optimum, it is between this and no answer.
+
 ### The fourth lever, currently unimplemented
 
 `MIP-FORMULATION.md:667` also specifies *"a small deviation-from-current-plan term
@@ -521,19 +787,22 @@ Run it as an experiment before deleting anything.
 
 | # | Step | Gate to the next step |
 |---:|---|---|
-| 1 | **Netbacks for 11 products + 4 sinks** — now the only thing on the critical path | Ratios sane against each other |
+| 1 | ~~Netbacks~~ — **done**: 32 operations figures, 100% of real demand priced | — |
 | 2 | ~~Equal-netback guardrail~~ — invalid, see section 4. Use the reprice-the-baseline check instead, which needs step 1 | Finance recognises the margin |
 | 3 | ~~Flip to maximise~~ — **built** (`objective="margin"`), opt-in, cost still the default | Solves; charges 10.5% more than cost |
 | 4 | Calibrate the per-unit changeover cost, one unit at a time (the mechanism is built; the tables are empty) | Campaign medians match observed |
 | 4b | **Settle `terminal_value_fraction`** — or replace it with a rolling horizon or safety stocks (section 5b) | A margin run stops being one point on a curve |
 | 5 | Drop the charge floor | Schedule does not move |
 
-**What building step 3 changed about this table.** The flip is done, and it turned
-out to be *less* blocked on data than expected in one way and *more* in another. The
-mechanism needed no netbacks — but it cannot be validated without them, because the
-cheap guardrail that was supposed to substitute for real prices does not work. Step 1
-is now the only thing on the critical path, and step 4b is the item most likely to
-embarrass a margin run shown to anyone.
+**Nothing here is blocked on data.** Step 1 was finished before this document was
+written — 32 operations netbacks, 100% of the real demand book priced — and several
+paragraphs of this file were built on the wrong assumption that it was pending. Every
+margin measurement recorded here was already running on those real prices.
+
+What remains is judgement and scoring, not collection: **step 4b**
+(`terminal_value_fraction`, which is not a price and is still the number most likely
+to embarrass a margin run shown to anyone) and the reprice-the-baseline check in
+section 4, which needs only the code to report revenue, crude bill and margin apart.
 
 **Step 3 is deliberately run with the brake still off.** The extra changeovers the
 flip introduces on its own is the number that sizes the brake in step 4; setting a

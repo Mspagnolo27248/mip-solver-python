@@ -99,9 +99,34 @@ python scripts/init_db.py --reset
 ### Checking it works
 
 ```bash
-python -m pytest tests -q          # 16 tests, ~5 s
+python -m pytest tests -q          # ~95 tests, ~2 min
 python scripts/run_parity.py       # re-verify the engine against the workbook
+python scripts/snapshot.py         # did the model's answers move?
 ```
+
+### After changing anything in the model
+
+`tests/baseline.json` records what the optimizer answers on eight fixed cases, and
+`scripts/snapshot.py` diffs against it. Run it after any change to the objective,
+the constraints or the configuration:
+
+```bash
+python scripts/snapshot.py            # prints every field that moved
+python scripts/snapshot.py --update   # accept the change, and say why in the commit
+```
+
+This exists because the defects this model has had did not look like errors. An
+infeasible run was relabelled `feasible` and handed back a schedule; PuLP's
+rewritten status made every time-limited v1 result claim to be optimal; a reactor
+constraint cost binaries and did nothing. None of them changed anything a person
+would notice, and all three move a field in the baseline.
+
+**The exact tier is v0 at `mip_gap` 0**, because at the 2% gap used for planning
+the difference a modelling change makes is smaller than the gap itself — two
+separate experiments here produced confident numbers that turned out to be noise.
+v0 solves 100 days exactly in about three seconds, so exactness is affordable. v1
+cannot join it (at gap 0 it times out even over 42 days), so its rows are recorded
+for *structure* — status, campaign shape, switch counts — and carry no objective.
 
 ### If something goes wrong
 
