@@ -32,7 +32,7 @@ FIELDS = ["crude_price_per_bbl", "downgrade_discount_per_gal",
           "objective", "terminal_value_fraction", "safety_stock_days",
           "charge_floor_fraction",
           "terminal_shortfall_per_gal", "model_version", "horizon_days",
-          "time_limit_seconds", "mip_gap"]
+          "time_limit_seconds", "mip_gap", "mip_gap_abs"]
 
 LABELS = {
     "crude_price_per_bbl": ("Crude price", "$/bbl",
@@ -118,7 +118,20 @@ LABELS = {
                      "pure forecast."),
     "time_limit_seconds": ("Solver time limit", "seconds", ""),
     "mip_gap": ("Accepted gap", "fraction",
-                "Stop when within this of proven optimal."),
+                "Stop when within this fraction of proven optimal. Leave at "
+                "zero and use the dollar figure below: this objective measures "
+                "value given up, so it shrinks as the plan improves and a "
+                "percentage of it tightens on its own every time anything is "
+                "fixed."),
+    "mip_gap_abs": (
+        "Accepted gap", "$",
+        "Stop when within this many dollars of proven optimal - the figure "
+        "that means something, because it does not move when the objective "
+        "does. A changeover costs about $2,000, so $10,000 is \"do not spend "
+        "an hour proving something worth five changeovers\". Raising it does "
+        "not buy a better schedule: at $40,000 the 42-day model proves in 43 s "
+        "on a schedule worth 385,124, while $10,000 finds 379,196 and cannot "
+        "prove it."),
 }
 
 

@@ -19,6 +19,7 @@ ADDED_COLUMNS = [
     ("optimizer_params", "model_version", "VARCHAR(8) NOT NULL DEFAULT 'v1'"),
     ("optimizer_params", "switch_cost_by_unit", "JSON"),
     ("optimizer_params", "objective", "VARCHAR(8) NOT NULL DEFAULT 'cost'"),
+    ("optimizer_params", "mip_gap_abs", "FLOAT NOT NULL DEFAULT 10000.0"),
     ("optimizer_params", "terminal_value_fraction",
      "FLOAT NOT NULL DEFAULT 0.25"),
     ("optimizer_params", "safety_stock_days", "FLOAT NOT NULL DEFAULT 0.0"),

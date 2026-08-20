@@ -471,6 +471,13 @@ class OptimizerParams(Base):
     time_limit_seconds = Column(Integer, default=300, nullable=False)
     mip_gap = Column(Float, default=0.02, nullable=False)
 
+    #: Dollars of objective the solver may leave on the table. Absolute, because
+    #: the cost objective measures value *given up* and shrinks as the model
+    #: improves - so a percentage of it tightens every time anything is fixed,
+    #: with no decision behind it. Taking the phantom downgrade charge out cut
+    #: the objective fourfold and the same 2% stopped closing at any time limit.
+    mip_gap_abs = Column(Float, default=10000.0, nullable=False)
+
     def missing(self) -> list:
         """Inputs with no value, which the optimizer cannot run without."""
         gaps = []
