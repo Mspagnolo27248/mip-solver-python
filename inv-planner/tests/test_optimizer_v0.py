@@ -305,12 +305,16 @@ def test_a_transfer_is_not_subtracted_twice(solved):
     """Loose mode sums every charge line matching a product. A block that also
     carries the line in a row of its own - `Out to Diesel`, or the one block that
     names a transfer row outright - then subtracts the same barrels twice. It was
-    10.8 M gal a year across five products."""
+    10.8 M gal a year across five products.
+
+    This covers the block-level half of the guard only - see
+    `test_a_row_does_not_count_a_line_it_names_outright` for the other half.
+    """
     from invplanner import engine as E
     from invplanner.engine import simulate
     ref, scn, _, dates, _ = solved
 
-    def old_charge_total(self, code, d, block_id=None):
+    def old_charge_total(self, code, d, block_id=None, exclude=()):
         if not code:
             return 0.0
         return sum(self.scn.charge_bbl(l["key"], d)
@@ -330,6 +334,63 @@ def test_a_transfer_is_not_subtracted_twice(solved):
                    for b in ref.blocks)
 
     assert out(fixed) < out(doubled), "the double count is back"
+
+
+def test_a_row_does_not_count_a_line_it_names_outright(solved):
+    """A row that sums a code lookup *and* an explicit row reference must not
+    take the same barrels twice.
+
+    The waxy light neutral block does exactly that - `charge_first_match 9116`
+    plus `charge_row 115` in one row - and `MEK#72` and `TRANSFER_DIESEL#115`
+    both carry code 9116. So in loose mode the transfer came out twice: 271,383
+    gal on hand against 542,765 drawn, to the gallon a doubling.
+
+    The block-level `_accounted` guard cannot catch this. It works by skipping
+    lines a block subtracts through a row *of its own*, and it deliberately skips
+    the production-out row when building that set - which is the row doing the
+    double count here.
+
+    Nothing caught it for a different reason too: parity runs in strict mode,
+    where the workbook's VLOOKUP stops at the first match, `MEK#72`, and never
+    reaches the transfer. It only bites in loose mode with volume on the
+    transfer - rare in the plan, ordinary once the optimizer began using the
+    diesel route.
+
+    Asserted by putting volume on the transfer and reading the block's own
+    production-out row, so it fails on the arithmetic rather than on a total
+    that something else could move.
+    """
+    import copy
+
+    from invplanner.engine import GAL_PER_BBL, Scenario, simulate
+    ref, scn, _, dates, _ = solved
+
+    line, block_id = "TRANSFER_DIESEL#115", "LLN:14"
+    assert any(l["key"] == line and l["code"] == "9116" for l in ref.charge_lines)
+    assert any(l["key"] == "MEK#72" and l["code"] == "9116"
+               for l in ref.charge_lines), "the collision this guards is gone"
+
+    rate, days = 1000.0, dates[:10]
+    data = copy.deepcopy(scn.raw)
+    lines = data["charge_schedule"]["lines"]
+    lines.setdefault(line, {})
+    for d in days:
+        lines[line][d.isoformat()] = rate
+
+    before = simulate(ref, scn, strict_workbook=False, physical=True)
+    after = simulate(ref, Scenario(data), strict_workbook=False, physical=True)
+
+    # `Production Out &DG DFO` is the workbook's label; the balance canonicalises
+    # it to `Production Out`.
+    def drawn(sim):
+        return sum(sim.balances[block_id].get("Production Out", {})
+                   .get(d, 0.0) for d in days)
+
+    moved = drawn(after) - drawn(before)
+    expected = rate * len(days) * GAL_PER_BBL
+    assert moved == pytest.approx(expected, rel=1e-9), (
+        "{:,.0f} gal charged came out as {:,.0f} - a factor of {:.2f}"
+        .format(expected, moved, moved / expected if expected else 0))
 
 
 def test_deep_extraction_keeps_its_own_rate(solved):

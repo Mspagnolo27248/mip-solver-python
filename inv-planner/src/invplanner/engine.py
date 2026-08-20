@@ -212,25 +212,38 @@ class Engine:
         return 0.0
 
     def charge_total(self, code: Optional[str], d: dt.date,
-                     block_id: Optional[str] = None) -> float:
+                     block_id: Optional[str] = None,
+                     exclude: Iterable[str] = ()) -> float:
         """Barrels charged of `code` across every unit (physically correct).
 
         Lines a block already subtracts through a row of its own are left out -
         the `Out to Diesel` row, and the one block that names a transfer row
         explicitly (Kensol 30 to finished diesel). Counting them here as well
         would take the same barrels out twice.
+
+        `exclude` is the same rule applied *within* one row. The waxy light
+        neutral block sums `charge_first_match 9116` and `charge_row 115` in a
+        single row, and both `MEK#72` and `TRANSFER_DIESEL#115` carry code 9116 -
+        so the transfer came out twice. The block-level guard cannot catch it
+        because it skips the production-out row, which is the row doing it.
+
+        Strict mode is unaffected: the workbook's VLOOKUP stops at the first
+        match, `MEK#72`, and never reaches the transfer. That is why parity
+        stayed green over a double count that only bites when the transfer
+        carries volume - which the plan barely does and the optimizer now does.
         """
         if not code:
             return 0.0
+        skip = set(self._accounted.get(block_id, ())) | set(exclude)
         return sum(self.scn.charge_bbl(l["key"], d)
                    for l in self._lookup_lines
-                   if l["code"] == code
-                   and l["key"] not in self._accounted.get(block_id, ()))
+                   if l["code"] == code and l["key"] not in skip)
 
     def charge_out(self, code: Optional[str], d: dt.date,
-                   block_id: Optional[str] = None) -> float:
+                   block_id: Optional[str] = None,
+                   exclude: Iterable[str] = ()) -> float:
         return (self.charge_first_match(code, d) if self.strict
-                else self.charge_total(code, d, block_id))
+                else self.charge_total(code, d, block_id, exclude))
 
     def to_diesel_bbl(self, code: Optional[str], d: dt.date) -> float:
         if not code:
@@ -384,6 +397,11 @@ class Engine:
             return wd["value"]
 
         total = 0.0
+        # Lines this row names outright. A code lookup in the same row must not
+        # pick them up again - see `charge_total`.
+        named = {line["key"] for t in spec.get("terms", [])
+                 if t.get("kind") == "charge_row"
+                 for line in (self._lines_by_row.get(t["row"]),) if line}
         for term in spec.get("terms", []):
             kind = term.get("kind")
             code = term.get("code")
@@ -405,7 +423,7 @@ class Engine:
                 rate = self.forecast_rate(code, d)
                 total += 0.0 if sales_so_far > rate else rate - sales_so_far
             elif kind == "charge_first_match":
-                total += self.charge_out(code, d, block["id"]) * GAL_PER_BBL
+                total += self.charge_out(code, d, block["id"], named) * GAL_PER_BBL
             elif kind == "to_diesel":
                 total += self.to_diesel_bbl(code, d) * GAL_PER_BBL
             elif kind == "charge_row":

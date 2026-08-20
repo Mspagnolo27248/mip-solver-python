@@ -1156,6 +1156,11 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         v = value_of.get(p)
         if v is None:
             return lost_margin
+        # Gasoline is a sale, not disposal: not reforming leaves naphtha
+        # unreformed, not platformate sitting in a tank. So the floor below does
+        # not apply and the margin given up is the gasoline margin itself.
+        if not cfg.is_disposal(p):
+            return max(0.0, v)
         # Never below the cost of getting rid of the material. #6 oil carries a
         # gross profit of -$0.32/gal, and taken literally that makes failing to
         # serve its demand *profitable* - the model duly booked 25,000 gal of
@@ -1185,7 +1190,25 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         """
         landed = sink_value.get(sink)
         if p in value_of and landed is not None:
-            return max(0.0, value_of[p] - landed)
+            # **Not the margin gap.** A downgraded gallon does not forgo a sale:
+            # if it displaced one, demand goes unserved and the `lost` term
+            # charges the whole netback for it, so charging `value - landed`
+            # here as well bills the same gallon twice. And if demand was
+            # already met there was no sale to forgo at all, which made the
+            # charge pure fiction - $5,585,893 of a $7,370,310 objective over
+            # 100 days, on four products with zero unserved demand between them.
+            #
+            # That fiction is what backed the tanks up. Surplus Kensol 30 costs
+            # $2.30/gal to move to diesel and nothing to leave where it is, so
+            # the model left it, filled its tank, and then had to throttle the
+            # platformer - which backed naphtha up to its own ceiling. The
+            # plant just ships it.
+            #
+            # What a downgrade really gives up is the chance to sell the gallon
+            # *after* the window, which is exactly what terminal value prices.
+            # So the residual is holding value less what the sink pays. For
+            # Kensol 30 that is zero; for Kensol 61 it is three cents.
+            return max(0.0, terminal_value_of(p) - landed)
         return netbacks.get(sink, discount)
 
     # ------------------------------------------------------ margin objective
@@ -1340,9 +1363,30 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # on this model is expensive and not worth paying for: the objective is
     # nearly flat across many schedules, so the last fraction of a percent costs
     # far more search than it is worth to a planner. Take the gap.
+    #
+    # **The absolute gap is the one that means anything here, and it is the one
+    # to set.** A cost objective measures value *given up*, so it shrinks toward
+    # zero as the model gets better - and a relative gap therefore tightens
+    # every time anything is fixed, with no decision behind it. Removing the
+    # phantom downgrade charge cut the objective roughly fourfold and the same
+    # 2% went from tens of thousands of dollars of slack to about twelve, at
+    # which point nothing proved inside its time limit and eleven tests that
+    # never mentioned optimality failed together.
+    #
+    # In dollars the question has an answer a planner can give: a changeover
+    # costs $2,000, so $10,000 is "do not spend an hour proving something worth
+    # five changeovers". That number stays put whatever the objective does.
+    #
+    # `gapRel` is kept and defaults to zero. CBC stops at whichever bound it
+    # reaches first, so leaving it set would silently reintroduce the treadmill
+    # on the day someone raised it.
+    gap_abs = params.get("mip_gap_abs")
+    if gap_abs is None:
+        gap_abs = cfg.DEFAULT_GAP_ABS
     solver = pulp.PULP_CBC_CMD(msg=0,
                                timeLimit=params.get("time_limit_seconds", 300),
-                               gapRel=params.get("mip_gap", 0.02),
+                               gapRel=params.get("mip_gap") or 0.0,
+                               gapAbs=float(gap_abs),
                                warmStart=bool(free))
     status = prob.solve(solver)
     res.solve_seconds = time.time() - t0

@@ -839,3 +839,100 @@ gal of lost sales and 5,595,214 gal of downgrade (`MIP-FORMULATION.md:784-787`).
 After this change it becomes the one that was always wanted: **the optimised
 schedule must make more money than the plan**, at a changeover count planners judge
 operable. Both halves of that sentence are load-bearing.
+
+---
+
+## 10. The cost objective's downgrade term, corrected (2026-08-19)
+
+Section 9 records why the *margin* objective drops `dg_cost` entirely: a downgrade
+moves material between tanks, the gallon earns later where it lands, and pricing
+the move pays for the same gallon twice. That reasoning was right, and it applied
+to the cost objective too — where nobody had applied it.
+
+`dg_cost` charged `value_of[p] - landed` on **every** downgraded gallon,
+unconditionally. It is a constant coefficient: it takes a product and a sink and
+returns a price, so it never sees demand, never sees `lost`, and cannot know
+whether the gallon it is charging had a buyer.
+
+Measured on the 100-day cost run, on products with **zero** unserved demand:
+
+| product | sink | downgraded | own $/gal | sink $/gal | charged |
+|---|---|---|---|---|---|
+| 4111 Kensol 30 | FINDSL | 639,258 gal | 3.10 | 0.80 | $1,470,293 |
+| 9703 Kensol 61 UNHT | DIESEL | 3,432,565 gal | 1.52 | 0.35 | $4,016,101 |
+| 9712 Kensol 50 UNHT | DIESEL | 70,686 gal | 1.40 | 0.35 | $74,220 |
+| 4118 Kensol 50H | DIESEL | 21,606 gal | 1.52 | 0.35 | $25,279 |
+| | | | | | **$5,585,893** |
+
+Against an objective of $7,370,310. **Three quarters of what the model was
+minimising was the opportunity cost of sales that were never available to lose.**
+
+It is a double charge in the other direction too. If a downgraded gallon *did*
+displace a sale, demand goes unserved and the `lost` term already charges the full
+netback for it; adding the margin gap on top bills the gallon twice. So the term is
+redundant when demand is unmet and fiction when it is met.
+
+**What it actually cost.** Surplus Kensol 30 was priced at $2.30/gal to ship and
+nothing to leave in the tank, so the model left it. The tank filled, the platformer
+had to throttle — K30 is 21% of the naphtha charge — and naphtha backed up to its
+own ceiling. The plan ships 24,442 bbl of K30 to diesel over the window; the model
+would only move 15,220.
+
+**The fix.** A downgrade gives up the chance to sell the gallon *after* the window,
+which is what terminal value already prices. So the residual is holding value less
+what the sink pays: `max(0, terminal_value_of(p) - landed)`. For Kensol 30 that is
+zero, for Kensol 61 three cents. The `lost` term does the protecting it always did
+— shipping a gallon that has a buyer still costs its full netback, so the model
+serves demand first and ships only the surplus.
+
+| | before | after |
+|---|---|---|
+| naphtha reformed | 86% of production | 94% |
+| K30 → diesel | 15,220 bbl | 43,950 bbl |
+| K30 tank at window end | 100% full | 12% |
+| naphtha tank at window end | 100% full | 36% |
+| lost sales | 3,030,265 gal | 1,329,429 gal |
+| of which finished diesel | 999,640 gal | **0** |
+
+Lost sales *fall* by 1.7 M gal, which is the check that matters: a model that had
+started dumping sellable material would short more demand, not less.
+
+### 10a. An engine double count this uncovered
+
+Letting the model use the diesel route exposed a defect in the simulator. The waxy
+light neutral block sums two terms in one row:
+
+```json
+{"terms": [{"kind": "charge_first_match", "code": "9116"},
+           {"kind": "charge_row", "row": 115}]}
+```
+
+`MEK#72` and `TRANSFER_DIESEL#115` both carry code `9116`, so in loose mode the
+transfer was subtracted twice — 271,383 gal available against 542,765 drawn,
+exactly double. The block-level `_accounted` guard cannot catch it: that guard
+skips the production-out row, and the production-out row is the one doing it.
+
+A row's code lookup now excludes any line the same row names outright.
+
+**Parity never saw this**, and could not: the workbook's VLOOKUP stops at the first
+match, `MEK#72`, and never reaches the transfer. It only bites in loose mode, and
+only when the transfer carries volume — which the plan barely does and the
+corrected objective now does. The lesson is the one from `_accounted`'s own
+comment: the guard has to be as local as the row it protects.
+
+### 10b. Gasoline priced at what it fetches
+
+Operations confirmed gasoline nets **crude cost plus $0.20/gal**. The netbacks file
+carried $0.50, the only price in it above what the same material fetches as its own
+product. Platformate and isomerate inherit it.
+
+Their 5020 blending forecast is also not an obligation — the refinery sells as much
+gasoline as it can make — so `lost_cost` no longer puts the $0.50 disposal floor
+under it. That floor exists because #6 oil's margin is negative and shorting it
+would otherwise read as a reward; gasoline is the opposite case, where not making
+platformate leaves *naphtha* unreformed rather than platformate undisposed-of.
+
+Worth recording that this changed the score and not the schedule: the gasoline
+shortfall is unavoidable at any price the plant can reach, so pricing it moved
+$1.15 M of reported cost and left the plan alone. The naphtha build was never the
+netback. It was the K30 tank.

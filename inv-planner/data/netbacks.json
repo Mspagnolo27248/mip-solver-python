@@ -130,9 +130,10 @@
    "kind": "Sold as-is"
   },
   "GASOLINE": {
-   "gross_profit_per_gal": 0.5,
+   "gross_profit_per_gal": 0.2,
    "name": "Gasoline blending pool",
-   "kind": "Downgrade outlet"
+   "kind": "Downgrade outlet",
+   "source": "operations, supplied in conversation 2026-08-19: gasoline nets crude cost plus $0.20/gal. Replaces the $0.50 captured on 2026-08-13, which was the only price in this file above the value the same material fetches as its own product."
   },
   "8221": {
    "gross_profit_per_gal": -0.32,
