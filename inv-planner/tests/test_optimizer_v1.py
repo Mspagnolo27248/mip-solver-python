@@ -404,7 +404,12 @@ def test_v2_frees_all_three_units_by_solving_them_in_turn(v2_solved):
     # ...and the guarantee on offer is named, because "optimal" on a two-stage
     # solve means something weaker than it does on a single one.
     assert res.kpis["globally_optimal"] is False
-    assert "not a joint optimum" in res.message
+    # Present whatever else the message carries. A stage that stops on its time
+    # limit makes v0 write its own warning, and the caveat used to be dropped
+    # rather than added to - losing it on exactly the run that needs it most.
+    assert "not a joint optimum" in res.message, res.message
+    if any(st["status"] != "optimal" for st in res.kpis["stages"]):
+        assert "NOT proved optimal" in res.message, res.message
 
 
 def test_v2_hands_stage_one_on_untouched(v2_solved):

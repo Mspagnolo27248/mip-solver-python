@@ -140,8 +140,15 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # and not jointly. Saying so on the result is cheaper than someone inferring
     # a guarantee from the word `optimal` that was never on offer.
     second.kpis["globally_optimal"] = False
-    if not second.message:
-        second.message = ("two-stage: {} then {}, each proved optimal in its own "
-                          "stage; the pair is not a joint optimum"
-                          .format("+".join(STAGE_ONE), "+".join(STAGE_TWO)))
+    # Appended, never conditional. `if not second.message` dropped this caveat
+    # whenever a stage stopped on its time limit and v0 had already written the
+    # "not proved optimal" warning - which is the one run where a reader most
+    # needs to be told the two stages never saw each other. The two warnings are
+    # about different things and both have to survive.
+    proved = all(st["status"] == "optimal" for st in second.kpis["stages"])
+    note = ("two-stage: {} then {}, each {} in its own stage; the pair is not a "
+            "joint optimum".format(
+                "+".join(STAGE_ONE), "+".join(STAGE_TWO),
+                "proved optimal" if proved else "solved"))
+    second.message = "{}. {}".format(second.message, note) if second.message else note
     return second
