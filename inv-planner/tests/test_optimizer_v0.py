@@ -393,6 +393,56 @@ def test_a_row_does_not_count_a_line_it_names_outright(solved):
         .format(expected, moved, moved / expected if expected else 0))
 
 
+def test_a_fixed_unit_is_charged_for_the_changeovers_it_inherits(solved):
+    """The price of a changeover must not depend on who chose it.
+
+    The arcs - and `arc_cost` with them - are built only inside
+    `for unit in sorted(free)`, so with nothing freed v0's changeover term summed
+    over nothing. v0 was charged $0 for switching while inheriting every
+    changeover the planner made: 119 over 100 days, $238,000 at the default
+    price. The objective therefore meant a different thing in each model version
+    and inverted the comparison - v0 read 8.6% better than v2 at 100 days, where
+    on equal terms v2 is 20.9% better at 42.
+
+    Two things have to hold at once, and they pull in opposite directions:
+
+      * the objective **must** move with `switch_cost`, or the cost is not being
+        charged; and
+      * the schedule **must not**, because a fixed unit cannot avoid these
+        changeovers and the term is a constant. A constant that moved the answer
+        would mean it had been written as something else by mistake.
+    """
+    from invplanner import model_config as cfg
+    from invplanner.optimizer import v0
+    ref, scn, spec, dates, _ = solved
+    down = {u: cfg.turnaround_days(u) for u in cfg.TURNAROUNDS}
+
+    def run(cost):
+        p = dict(PARAMS, switch_cost=cost, horizon_days=len(dates))
+        return v0.solve(ref, scn, spec, p, horizon=dates, downtime=down)
+
+    free_run, paid = run(0.0), run(2000.0)
+    assert free_run.status == "optimal" and paid.status == "optimal"
+
+    inherited = paid.kpis["inherited_switches"]
+    assert inherited, "the fixture plan makes no changeovers to inherit"
+    n = sum(inherited.values())
+    assert paid.kpis["inherited_switch_cost"] == pytest.approx(n * 2000.0)
+
+    # charged...
+    assert paid.objective == pytest.approx(free_run.objective + n * 2000.0), (
+        "the objective did not move by the price of the inherited changeovers")
+
+    # ...but not steering
+    for field in ("charge_bbl", "lost_sales_gal", "downgrade_gal"):
+        assert paid.kpis[field] == pytest.approx(free_run.kpis[field]), (
+            "{} moved: the inherited cost is not a constant".format(field))
+
+    # A cascade unit runs several lines at once, so it has no setup to change.
+    for unit in cfg.CASCADE_UNITS:
+        assert unit not in inherited, unit
+
+
 def test_deep_extraction_keeps_its_own_rate(solved):
     """Extraction runs 9305 two ways, and the modes have different ceilings.
 

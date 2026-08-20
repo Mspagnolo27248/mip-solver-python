@@ -1146,6 +1146,45 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
             if len(on) > cap:
                 prob += pulp.lpSum(on) <= cap, "nprod_{}_{}".format(unit, s)
 
+    # Changeovers a *fixed* unit inherits from the plan.
+    #
+    # The arcs above exist only for freed units, so with nothing freed the
+    # objective's changeover term summed over nothing and v0 was charged $0 for
+    # switching while silently inheriting every changeover the planner made -
+    # 119 of them over 100 days, $238,000 at the default price. That made the
+    # objective mean a different thing in every model version and inverted the
+    # comparison: v0 read 8.6% better than v2 at 100 days, and on equal terms
+    # v2 is 20.9% *better* at 42.
+    #
+    # Priced as a constant, deliberately. A fixed unit cannot avoid these - it
+    # does not choose its assignments - so a constant cannot move its argmin,
+    # and v0's schedule must come back bit-identical. What changes is only that
+    # the number on the end means the same thing as v2's.
+    #
+    # Cascade units are excluded because they run several lines at once, so
+    # "what the unit is set up for" is not a question about them. Transfers
+    # never reach here: `lines` has already dropped them.
+    inherited_switches: Dict[str, int] = {}
+    inherited_cost = 0.0
+    for unit in sorted({l["unit"] for l in lines}):
+        if unit in free or unit in cfg.CASCADE_UNITS:
+            continue
+        ulines = [l for l in lines if l["unit"] == unit]
+        feed = {l["key"]: l["workbook_product"] for l in ulines}
+        held, n = None, 0
+        for d in dates:
+            on = [l["key"] for l in ulines if scn.charge_bbl(l["key"], d) > 0]
+            if not on:
+                continue                  # idle: the unit keeps its last feed
+            now = on[-1]
+            if held is not None and now != held:
+                n += 1
+                inherited_cost += cfg.switch_cost_for(
+                    unit, feed[held], feed[now], switch_cost, switch_cost_by_unit)
+            held = now
+        if n:
+            inherited_switches[unit] = n
+
     # ------------------------------------------------------------ objective
     # A lost sale gives up the product's own margin; a downgrade gives up the
     # difference between where it was going and where it ends up. Both fall back
@@ -1325,6 +1364,7 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
             - DRAIN_PENALTY * pulp.lpSum(drain.values())
             - pulp.lpSum(v * arc_cost.get(a, switch_cost)
                          for (a, s), v in arc.items())
+            - inherited_cost
             - pulp.lpSum(v for fam in slacks.values()
                          for v in fam.values()) * PENALTY
         )
@@ -1354,6 +1394,8 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
             # until someone does.
             + pulp.lpSum(v * arc_cost.get(a, switch_cost)
                          for (a, s), v in arc.items())
+            # ...and the ones a fixed unit inherits, so both are counted
+            + inherited_cost
             + pulp.lpSum(v for fam in slacks.values()
                          for v in fam.values()) * PENALTY
         )
@@ -1563,4 +1605,9 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
             }
         res.kpis["campaign_shape"] = shape
         res.kpis["switches"] = sum(s["switches"] for s in shape.values())
+    # What the plan's own assignments cost, on the units this run did not free.
+    # Reported next to the price so a reader can see what is being charged for
+    # rather than inferring it from a total that moved.
+    res.kpis["inherited_switches"] = inherited_switches
+    res.kpis["inherited_switch_cost"] = inherited_cost
     return res
