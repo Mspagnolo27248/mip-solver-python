@@ -193,15 +193,20 @@ def test_stream_sheet_returns_every_product_with_full_balance(db):
     app.dependency_overrides.clear()
 
 
-def test_dashboard_groups_cover_every_product_exactly_once(db):
+def test_dashboard_groups_cover_every_live_product_exactly_once(db):
     """No product may vanish from the dashboards, and none may be double-counted.
 
     The "other" group is the safety net: a newly added block lands there rather
     than disappearing, so this stays true as the product list changes.
+
+    Retired products are the one exception, and they are checked separately
+    below rather than merely excused here - the whole risk of hiding something
+    is that it comes back through a route nobody was looking at.
     """
     from fastapi.testclient import TestClient
 
     from invplanner import groups
+    from invplanner import model_config as cfg
     from invplanner.api.main import app
     from invplanner.db import service as svc
     from invplanner.db.models import Scenario as ScenarioModel
@@ -213,7 +218,10 @@ def test_dashboard_groups_cover_every_product_exactly_once(db):
     sid = scenario.id
 
     ref = svc.engine_reference(db, scenario.reference_version_id)
-    expected = {b["id"] for b in ref.blocks} | {"CRUDE:14"}
+    expected = {b["id"] for b in cfg.live_blocks(ref.blocks)} | {"CRUDE:14"}
+    retired = {b["id"] for b in ref.blocks
+               if cfg.is_retired(code=b.get("charge_code"))}
+    assert retired, "the fixture must still contain something retired to hide"
 
     seen = []
     for g in client.get("/api/dashboards").json():
@@ -226,6 +234,9 @@ def test_dashboard_groups_cover_every_product_exactly_once(db):
     assert len(seen) == len(set(seen)), "a product appears in more than one group"
     assert set(seen) == expected, "groups do not cover every product: {}".format(
         expected.symmetric_difference(seen))
+    assert not (retired & set(seen)), (
+        "retired products are back on the dashboard: {}"
+        .format(sorted(retired & set(seen))))
 
     # Series must be downsampled but keep the true extremes and the last day.
     d = client.get("/api/scenarios/{}/dashboard".format(sid),
@@ -352,6 +363,115 @@ def test_reference_data_is_editable_and_changes_the_projection(db):
     db.refresh(scenario)
     restored = svc.simulate_scenario(db, scenario).prod(product, day)
     assert restored == pytest.approx(before, rel=1e-9)
+
+    app.dependency_overrides.clear()
+
+
+def test_a_retired_product_is_gone_from_every_screen(db):
+    """Retired means retired: not on a chart, not in a picker, not editable.
+
+    The solver has dropped 9202 and 4325 since `RETIRED` was written, but the
+    planner side kept showing them - a chart with no production, a tank
+    capacity nobody could reach, and charge rows the next run would silently
+    discard. Hiding them is spread across six endpoints and the reference
+    editor, so this asserts the outcome rather than the mechanism: name a
+    retired product and it must not appear anywhere a planner looks.
+
+    Deliberately not asserted: that the blocks are gone from the *simulation*.
+    Nothing needs them - deleting both from the reference moves no row anywhere
+    - but the engine's job is to reproduce the workbook cell for cell so the
+    parity harness has something to compare against, and a block it does not
+    carry is a block parity stops checking. Retiring happens a layer up.
+    """
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from invplanner import model_config as cfg
+    from invplanner.api.main import app
+    from invplanner.db import reference_edit as refedit
+    from invplanner.db import service as svc
+    from invplanner.db.models import RefKind, ReferenceVersion
+    from invplanner.db.models import Scenario as ScenarioModel
+    from invplanner.db.session import get_session
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    scenario = db.query(ScenarioModel).order_by(ScenarioModel.id).first()
+    sid = scenario.id
+    ref = svc.engine_reference(db, scenario.reference_version_id)
+
+    dead_codes = sorted(cfg.RETIRED["products"])
+    assert dead_codes, "nothing is retired, so this test proves nothing"
+    dead_blocks = {b["id"] for b in ref.blocks
+                   if b.get("charge_code") in dead_codes}
+    dead_lines = {l["key"] for l in ref.charge_lines
+                  if l["key"] not in {x["key"]
+                                      for x in cfg.live_charge_lines(ref.charge_lines)}}
+    assert dead_blocks and dead_lines
+
+    # 1. the product picker and the stream sheets
+    codes = {p["code"] for p in
+             client.get("/api/scenarios/{}/products".format(sid)).json()}
+    assert not (set(dead_codes) & codes)
+
+    for sheet in {b["sheet"] for b in ref.blocks if b["id"] in dead_blocks}:
+        d = client.get("/api/scenarios/{}/stream".format(sid),
+                       params={"sheet": sheet, "days": 3}).json()
+        assert not (dead_blocks & {b["block_id"] for b in d["blocks"]})
+
+    # 2. the charts, in every family including "other"
+    for g in client.get("/api/dashboards").json():
+        d = client.get("/api/scenarios/{}/dashboard".format(sid),
+                       params={"group": g["id"], "days": 60}).json()
+        shown = {p["block_id"] for s in d["sections"] for p in s["products"]}
+        assert not (dead_blocks & shown), g["id"]
+
+    # 3. the alerts, which is the one screen that reports by exception
+    a = client.get("/api/scenarios/{}/alerts".format(sid),
+                   params={"days": 120}).json()
+    assert not (dead_blocks & {x["block_id"] for x in a["alerts"]})
+
+    # 4. the charge grid, and the export taken from it
+    sch = client.get("/api/scenarios/{}/schedule".format(sid),
+                     params={"days": 7}).json()
+    on_grid = {l["key"] for u in sch["units"] for l in u["lines"]}
+    assert not (dead_lines & on_grid)
+    assert "TOLLING" not in {u["unit"] for u in sch["units"]}
+
+    # 5. a direct hit on a hidden thing is refused, not quietly served
+    for block_id in dead_blocks:
+        r = client.get("/api/scenarios/{}/projection".format(sid),
+                       params={"block_id": block_id})
+        assert r.status_code == 404, block_id
+    for key in dead_lines:
+        r = client.patch("/api/scenarios/{}/schedule".format(sid),
+                         json={"line_key": key, "date": "2026-07-23", "bbl": 1.0})
+        assert r.status_code == 400, key
+
+    # 6. the reference editor, where a value that changes nothing is worse than
+    #    no value at all
+    rv = db.query(ReferenceVersion).get(scenario.reference_version_id)
+    for kind in RefKind.ALL:
+        rows = refedit.list_values(db, rv, kind)
+        items = rows["rows"] if isinstance(rows, dict) else rows
+        for r in items:
+            key = "{}|{}".format(r.get("k1"), r.get("k2"))
+            assert not any(c in key.split("|") or c in str(r.get("k1")).split("|")
+                           for c in dead_codes), (kind, r.get("k1"), r.get("k2"))
+
+    # 7. and the solver, which is where this all started
+    from invplanner.engine import Reference, Scenario, simulate
+    from invplanner.modelprep import build
+    eref = Reference.load(os.path.join(SEED, "reference.json"))
+    escn = Scenario.load(os.path.join(SEED, "scenario.json"))
+    spec = build(eref, escn, simulate(eref, escn, physical=True),
+                 horizon=escn.dates[:21])
+    assert not (set(dead_codes) & set(spec.products))
+    assert not (set(dead_codes) & {l.get("code") for l in spec.charge_lines})
+    dropped = _json.dumps(spec.dropped)
+    for c in dead_codes:
+        assert c in dropped, "{} must be dropped on the record, not silently".format(c)
 
     app.dependency_overrides.clear()
 

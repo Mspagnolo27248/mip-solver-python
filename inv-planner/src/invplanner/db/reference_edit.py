@@ -25,6 +25,8 @@ def _crude_yields(payload: Dict[str, Any]) -> List[Tuple[str, str, float, str]]:
     out = []
     products = payload.get("products", {})
     for code, months in sorted(payload.get("crude_yields", {}).items()):
+        if cfg.is_retired(code=code):
+            continue
         name = (products.get(code, {}) or {}).get("name", "")
         for month, value in months.items():
             out.append((code, month, float(value), name))
@@ -41,6 +43,13 @@ def _unit_yields(payload: Dict[str, Any]) -> List[Tuple[str, str, float, str]]:
     products = payload.get("products", {})
     for rule in payload.get("yield_rules", []):
         if rule.get("kind") != "unit":
+            continue
+        # A rule off a retired charge is a conversion that never happens: the
+        # MEK does not charge 9202, so its 9202 yields are an edit with no
+        # effect on anything the model or the workbook computes.
+        if (cfg.is_retired(unit=rule["unit"])
+                or cfg.is_retired(code=rule["charge_code"])
+                or cfg.is_retired(code=rule["out"])):
             continue
         key = "{}|{}|{}".format(rule["unit"], rule["charge_code"], rule["out"])
         charge_name = (products.get(rule["charge_code"], {}) or {}).get("name", "")
@@ -102,6 +111,8 @@ def _tank_capacity(payload: Dict[str, Any]) -> List[Tuple[str, str, float, str]]
     """
     products = payload.get("products", {})
     caps = dict(payload.get("tank_capacity", {}))
+    for code in [c for c in caps if cfg.is_retired(code=c)]:
+        caps.pop(code)
     rows = []
     for agg in cfg.AGGREGATIONS:
         hidden = set(agg["members"]) | {agg.get("pool")}
@@ -121,6 +132,8 @@ def _targets(payload: Dict[str, Any], which: str
              ) -> List[Tuple[str, str, Optional[float], str]]:
     out = []
     for code, t in sorted(payload.get("inventory_targets", {}).items()):
+        if cfg.is_retired(code=code):
+            continue
         value = t.get(which)
         out.append((code, None, None if value is None else float(value),
                     t.get("name", "")))

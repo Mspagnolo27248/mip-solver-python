@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import exporter, groups
+from .. import model_config as cfg
 from ..db import optimizer_service as optsvc
 from ..db import reference_edit as refedit
 from ..db import service as svc
@@ -289,7 +290,7 @@ def scenario_products(scenario_id: int,
     products = ref.products
     targets = ref.inventory_targets
     out = []
-    for b in ref.blocks:
+    for b in cfg.live_blocks(ref.blocks):
         code = b.get("charge_code")
         name = (products.get(code, {}) or {}).get("name") or b.get("label") or code
         t = targets.get(code) or targets.get(b.get("sold_code") or "") or {}
@@ -306,7 +307,8 @@ def projection(scenario_id: int, block_id: str,
     s = _get_scenario(db, scenario_id)
     sim = svc.simulate_scenario(db, s)
     ref = svc.engine_reference(db, s.reference_version_id)
-    block = next((b for b in ref.blocks if b["id"] == block_id), None)
+    block = next((b for b in cfg.live_blocks(ref.blocks)
+                  if b["id"] == block_id), None)
     if block is None:
         raise HTTPException(404, "no block {}".format(block_id))
     bal = sim.balances.get(block_id, {})
@@ -367,7 +369,7 @@ def list_streams(scenario_id: int,
     s = _get_scenario(db, scenario_id)
     ref = svc.engine_reference(db, s.reference_version_id)
     counts: Dict[str, int] = defaultdict(int)
-    for b in ref.blocks:
+    for b in cfg.live_blocks(ref.blocks):
         counts[b["sheet"]] += 1
     out = [{"sheet": sheet, "products": n, "unit": "gal"}
            for sheet, n in counts.items()]
@@ -397,7 +399,8 @@ def stream_sheet(scenario_id: int, sheet: str,
                         "row_order": CRUDE_ROWS}]
         unit = "bbl"
     else:
-        blocks_spec = sorted((b for b in ref.blocks if b["sheet"] == sheet),
+        blocks_spec = sorted((b for b in cfg.live_blocks(ref.blocks)
+                              if b["sheet"] == sheet),
                              key=lambda b: b["first_row"])
         unit = "gal"
     if not blocks_spec:
@@ -472,7 +475,7 @@ def dashboard(scenario_id: int, group: str = "base_oil",
     if sampled[-1] != window[-1]:
         sampled.append(window[-1])
 
-    specs = list(ref.blocks)
+    specs = cfg.live_blocks(ref.blocks)
     if group == "crude":
         specs = [{"id": L_CRUDE_BLOCK_ID, "sheet": "CRUDE", "charge_code": "8000",
                   "label": "Crude oil"}]
@@ -529,7 +532,7 @@ def alerts(scenario_id: int, days: int = Query(30, le=400),
     window = [svc._d(x) for x in s.inputs["dates"]][:days]
 
     out = []
-    for b in ref.blocks:
+    for b in cfg.live_blocks(ref.blocks):
         bal = sim.balances.get(b["id"], {})
         end = bal.get("End Inventory", {})
         cap = bal.get("Tank Capacity", {})
@@ -610,7 +613,7 @@ def get_schedule(scenario_id: int, days: int = Query(42, le=400), offset: int = 
             crude[c.date.isoformat()] = {"bbl": c.bbl, "mode": c.mode}
 
     units: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for line in ref.charge_lines:
+    for line in cfg.live_charge_lines(ref.charge_lines):
         row = {
             "key": line["key"], "code": line["code"], "name": line["name"],
             "values": entries.get(line["key"], {}),
@@ -668,7 +671,7 @@ def export_schedule(scenario_id: int, days: int = Query(42, le=400),
            .filter(OptimizerRun.result_scenario_id == s.id)
            .order_by(OptimizerRun.id.desc()).first())
     blob = exporter.schedule_workbook(
-        ref.charge_lines, values, dates,
+        cfg.live_charge_lines(ref.charge_lines), values, dates,
         title="Charge schedule - {}".format(s.name),
         subtitle=("Optimizer run {} ({}), warm started from scenario {}."
                   .format(run.id, (run.params or {}).get("model_version", "v0"),
@@ -687,6 +690,16 @@ def export_schedule(scenario_id: int, days: int = Query(42, le=400),
 def edit_schedule(scenario_id: int, body: ScheduleEdit,
                   db: Session = Depends(get_session)) -> Dict[str, Any]:
     s = _get_scenario(db, scenario_id)
+    # A bookmarked grid can still hold a line that has since been retired, and
+    # the optimizer would drop whatever was typed into it without saying so.
+    # Checked against the live list rather than `is_retired(line_key=...)`,
+    # which only knows lines retired by name - MEK#70 and TOLLING#94 are
+    # retired by their product and their unit instead.
+    ref = svc.engine_reference(db, s.reference_version_id)
+    live = {l["key"] for l in cfg.live_charge_lines(ref.charge_lines)}
+    if body.line_key not in live:
+        raise HTTPException(400, "{} is retired and is not scheduled"
+                            .format(body.line_key))
     entry = (db.query(ScheduleEntry)
              .filter(ScheduleEntry.scenario_id == s.id,
                      ScheduleEntry.line_key == body.line_key,

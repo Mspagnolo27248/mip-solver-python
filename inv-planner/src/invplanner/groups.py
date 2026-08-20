@@ -24,8 +24,10 @@ PRODUCT_GROUPS: List[Dict[str, Any]] = [
         "codes": [
             # light neutral
             "9718", "9720", "4329",
-            # medium neutral
-            "9117", "9302", "9704", "4315", "9118", "9202", "4325", "4577",
+            # medium neutral. 9202 and 4325 are retired and filtered out
+            # before grouping; listed here they would only look like an
+            # oversight to the next person reading this file.
+            "9117", "9302", "9704", "4315", "9118", "4577",
             # heavy neutral
             "9119", "9303", "4309", "4579",
             # bright stock / cylinder
