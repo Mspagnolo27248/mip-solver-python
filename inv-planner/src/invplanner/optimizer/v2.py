@@ -55,6 +55,10 @@ STAGE_ONE: List[str] = ["MEK", "EXTRACT"]
 #: Stage two: the unit that has to be solved alone to be solved at all.
 STAGE_TWO: List[str] = ["HYDRO"]
 
+#: Share of the run's time budget stage one may take. Stage two is the harder
+#: solve - it is the one that hits its limit - so the split favours it.
+STAGE_ONE_SHARE = 0.4
+
 
 def _carry(scn: Scenario, res: v0.OptimizeResult) -> Scenario:
     """The scenario with a stage's decisions written onto the charge lines.
@@ -87,8 +91,18 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     `free_units` is accepted and ignored - which units go in which stage is the
     whole content of this model, not a caller's choice.
     """
-    first = v0.solve(ref, scn, spec, params, horizon=horizon, downtime=downtime,
-                     elastic=elastic, free_units=list(STAGE_ONE), **kw)
+    # `time_limit_seconds` is the budget for the *run*, not for each stage.
+    # Handing the whole figure to both meant a 900 s setting produced an 1,813 s
+    # solve - the caller asked for one budget and got two. Stage one is the
+    # cheaper solve, so it takes the smaller share and hands on whatever it did
+    # not spend; a stage one that finishes early buys stage two more time rather
+    # than throwing it away.
+    budget = float(params.get("time_limit_seconds") or 300.0)
+    first_params = dict(params, time_limit_seconds=max(1.0, budget * STAGE_ONE_SHARE))
+
+    first = v0.solve(ref, scn, spec, first_params, horizon=horizon,
+                     downtime=downtime, elastic=elastic,
+                     free_units=list(STAGE_ONE), **kw)
     if first.status not in ("optimal", "feasible"):
         first.message = ("stage 1 ({}) did not solve: {}"
                          .format("+".join(STAGE_ONE), first.message or first.status))
@@ -98,7 +112,9 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # than floored: the charge floor would let this stage take back 70% of a
     # decision already made, and the two answers would not compose.
     staged = _carry(scn, first)
-    second = v0.solve(ref, staged, spec, params, horizon=horizon,
+    second_params = dict(params, time_limit_seconds=max(
+        1.0, budget - first.solve_seconds))
+    second = v0.solve(ref, staged, spec, second_params, horizon=horizon,
                       downtime=downtime, elastic=elastic,
                       free_units=list(STAGE_TWO), pin_units=list(STAGE_ONE), **kw)
     if second.status not in ("optimal", "feasible"):
@@ -128,6 +144,25 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     second.solve_seconds = first.solve_seconds + second.solve_seconds
     for unit, shape in (first.kpis.get("campaign_shape") or {}).items():
         second.kpis.setdefault("campaign_shape", {})[unit] = shape
+    # `switches` is computed per solve, so stage two's figure counted the
+    # hydrotreater alone and reported roughly a third of the run's changeovers.
+    # Recomputed from the merged shape rather than added up, so it cannot drift
+    # from the table beside it.
+    shape_all = second.kpis.get("campaign_shape") or {}
+    if shape_all:
+        second.kpis["switches"] = sum(c["switches"] for c in shape_all.values())
+    # Inherited changeovers are counted per solve, so stage two called stage
+    # one's units inherited - they are pinned there, not freed. They were still
+    # *chosen*, by stage one, and they are already in `switches`. Listing them in
+    # both places reports the same changeover twice to anyone adding up the two
+    # numbers. Only a unit no stage ever freed is genuinely inherited.
+    #
+    # This is presentation only: stage two's objective is right either way,
+    # because the pinned schedule really does cost those changeovers.
+    freed_somewhere = set(STAGE_ONE) | set(STAGE_TWO)
+    second.kpis["inherited_switches"] = {
+        u: n for u, n in (second.kpis.get("inherited_switches") or {}).items()
+        if u not in freed_somewhere}
     second.kpis["stages"] = [
         {"units": list(STAGE_ONE), "status": first.status,
          "seconds": round(first.solve_seconds, 1),
