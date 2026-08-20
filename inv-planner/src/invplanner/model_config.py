@@ -42,6 +42,18 @@ AGGREGATIONS: List[Dict[str, Any]] = [
     },
 ]
 
+#: Dollars of objective the solver may leave on the table before it stops.
+#:
+#: Absolute, not relative, because the cost objective measures value *given up*
+#: and so shrinks as the model improves - a percentage of it is a moving target
+#: that tightens every time anything is fixed, which is not a decision anyone
+#: made. In dollars the question is answerable: a changeover costs $2,000, so
+#: this is "do not spend an hour proving something worth five changeovers".
+#:
+#: Raise it if runs stop proving; lower it if a schedule looks obviously
+#: improvable. Both are judgements about the plant, which is the point.
+DEFAULT_GAP_ABS: float = 10_000.0
+
 #: Flows that exist in the workbook but are dead, and would otherwise give the
 #: optimizer objectives it can never satisfy.
 RETIRED: Dict[str, Any] = {
@@ -72,7 +84,59 @@ RETIRED: Dict[str, Any] = {
             "- which carries 3.2 M gal against this line's 13 k. Keeping both "
             "gave 4111 two outlets, which the plant does not have: a downgrade "
             "route is a line to one destination, not a choice."),
+        # The platformer's two self-charging rows. Both consume a product and
+        # produce nothing, which is the same shape as the diesel loops above.
+        "PLATFORMER#106": (
+            "Isomerate run charged back to the platformer. Confirmed with "
+            "operations that this is not a run the plant makes - it is how the "
+            "workbook wrote down isomerate leaving. Its feed 9501 has no supply "
+            "in the model anyway: the isomerate run's yield is booked straight "
+            "into 1128's tank, so the line drew on a product that is never "
+            "made."),
+        "PLATFORMER#107": (
+            "Platformate charged back to the platformer. Not a real run either: "
+            "it is where the workbook recorded platformate going to gasoline. "
+            "Kept alongside TRANSFER_GASOLINE it gave 9511 two outlets to the "
+            "same place, and the model would take whichever priced better."),
     },
+}
+
+#: Demand that is a sale at its own margin, not disposal of something already
+#: made - so `lost_cost` must not put the downgrade-discount floor under it.
+#:
+#: That floor exists because #6 oil carries a *negative* gross profit, which
+#: taken literally makes failing to serve its demand profitable. The answer was
+#: to say a lost sale is never a reward: declining #6 oil does not make the oil
+#: vanish, it leaves it in a tank to be got rid of some other way.
+#:
+#: Gasoline is the opposite case. Platformate and isomerate take their forecast
+#: from product 5020 (E10 gasoline), and not making them leaves *naphtha*
+#: unreformed rather than platformate undisposed-of. Operations confirm gasoline
+#: nets crude cost plus $0.20/gal and sells as far as the plant can make it, so
+#: the margin given up by not reforming is exactly that $0.20 - not the $0.50
+#: disposal floor, which is two and a half times too much and had the model
+#: reforming to avoid a cost that was not there.
+NOT_DISPOSAL: Dict[str, str] = {
+    "9511": "Platformate to gasoline is a sale at the gasoline margin.",
+    "1128": "Isomerate to gasoline is a sale at the gasoline margin.",
+}
+
+#: Blocks whose `Production Out` row names no product at all, so nothing can
+#: ever leave the tank however many lines point at it.
+#:
+#: The workbook never modelled a route off these three, so its VLOOKUP had
+#: nothing to look up and the cell reads zero. `_add_sink_lines` then invents an
+#: outlet for them - and the invented line moved material in the model while the
+#: replay moved none, which creates oil on the planner side. Latent until now
+#: only because no volume had ever been routed there.
+#:
+#: Repairing the hook is parity-safe: the workbook charges nothing on any line
+#: carrying these codes, so the engine still computes the same zero it always
+#: did against the workbook's own plan.
+MISSING_OUTLET_HOOK: Dict[str, str] = {
+    "Napthas:59": "9511",     # platformate  -> gasoline
+    "Napthas:75": "1128",     # isomerate    -> gasoline
+    "Cstock:141": "4586",     # Kendex 0866  -> #6 oil
 }
 
 #: The hydrotreater makes one diesel product from the diesel charge stock.
@@ -140,7 +204,18 @@ SINKS: Dict[str, Dict[str, Any]] = {
 SINK_ROUTES: Dict[str, Dict[str, Any]] = {
     "GASOLINE": {
         "status": "confirmed",
-        "products": ["9511", "1128"],
+        # Empty, and that is the point. The route these two take to gasoline is
+        # already in the model as their 5020 forecast; a second line to the same
+        # customer is not incremental offtake, it is the same barrels again.
+        # With the forecast free to go unserved (see ELASTIC_DEMAND) the model
+        # will happily short it to feed the sink, while the simulator serves
+        # demand first and finds nothing left - a 50,000 gal feed shortfall on a
+        # schedule that is fine.
+        #
+        # Worth restoring the day platformer production outruns the blending
+        # pull, because then there really is surplus with nowhere to go. It does
+        # not today: 5.7 M gal made against a 7.5 M gal forecast over 100 days.
+        "products": [],
         "why": ("Confirmed with operations: platformate and isomerate blend to "
                 "gasoline. Kensol 30 goes to diesel instead - a route the "
                 "workbook already carries and uses (3.2 M gal a year through the "
@@ -1186,3 +1261,42 @@ def is_retired(code: Optional[str] = None, unit: Optional[str] = None,
     if line_key and line_key in RETIRED["charge_lines"]:
         return True
     return False
+
+
+def is_disposal(code: Optional[str]) -> bool:
+    """False where unserved demand is a forgone sale rather than undisposed material."""
+    return not (code and code in NOT_DISPOSAL)
+
+
+def live_blocks(blocks: Any) -> Any:
+    """The product blocks a planner should be shown.
+
+    Retired blocks are hidden here rather than deleted, but not because
+    anything depends on them - deleting 9202 and 4325 from the reference and
+    re-simulating moves no row anywhere, 9118 included. The reason is what the
+    engine is for: it reproduces the workbook cell for cell so the parity
+    harness can compare against the workbook's own cached values, and a block
+    the engine does not carry is a block parity stops checking.
+
+    So the simplification belongs a layer up, which is where it already is:
+    `modelprep` drops them from the model and this drops them from the screen.
+
+    The near-miss worth remembering is that 9202's Sales row reads charge row
+    121 directly - the same Sonneborn lift that is 9118's Production Out. When
+    the double-count guard kept one global set of accounted-for lines, 9202
+    claimed that line and 9118 stopped being drawn down at all, appearing to
+    overflow by 707,233 gal. The guard is per block now, which is what makes
+    these two blocks inert rather than load-bearing.
+    """
+    return [b for b in blocks if not is_retired(code=b.get("charge_code"))]
+
+
+def live_charge_lines(lines: Any) -> Any:
+    """The charge lines a planner should be shown, on the same terms.
+
+    A retired line is one the optimizer already refuses to schedule, so leaving
+    it on the grid offers an edit that the next run silently discards.
+    """
+    return [l for l in lines
+            if not is_retired(code=l.get("code"), unit=l.get("unit"),
+                              line_key=l.get("key"))]

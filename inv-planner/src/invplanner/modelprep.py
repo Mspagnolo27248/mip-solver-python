@@ -113,6 +113,22 @@ def _add_missing_sink_lines(ref: Reference) -> List[Dict[str, Any]]:
                     "synthetic": True}
             ref.charge_lines.append(line)
             added.append(line)
+
+    # An invented outlet is useless without somewhere for the material to go
+    # *out of*. Three blocks name no product on their `Production Out` row, so
+    # the engine looks up nothing and the tank never drains - the model would
+    # move the volume and the replay would not, creating oil. Installed here,
+    # beside the line itself, because the line and the hook are one thing: split
+    # across two functions they would drift the first time a route was added.
+    for block in ref.blocks:
+        code = cfg.MISSING_OUTLET_HOOK.get(block["id"])
+        if not code or block.get("charge_code") != code:
+            continue
+        for region in (block["rows"].get("Production Out") or {}).get(
+                "regions") or []:
+            for term in region["spec"]["terms"]:
+                if term.get("kind") == "charge_first_match" and not term.get("code"):
+                    term["code"] = code
     return added
 
 

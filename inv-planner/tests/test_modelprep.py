@@ -154,7 +154,12 @@ def test_gasoline_takes_only_the_confirmed_blendstocks(built):
     """
     _, _, _, spec = built
     gas = {r["product"] for r in spec.sink_routes if r["sink"] == "GASOLINE"}
-    assert gas == {"9511", "1128"}, gas
+    # Empty on purpose. Platformate and isomerate already reach gasoline through
+    # their 5020 forecast, and a second line to the same customer is the same
+    # barrels twice - which is what the route's own `caution` warned about and
+    # what happened when it was used: the model shorted the forecast to feed the
+    # sink and the replay, serving demand first, found nothing left.
+    assert gas == set(), gas
     assert "4107" not in gas
 
     # Kensol 30 must route to diesel, not gasoline - and to the *finished* pool,
@@ -490,14 +495,26 @@ def test_every_kept_charge_line_points_at_a_modelled_product(built):
 
 
 def test_untanked_intermediates_exist_but_carry_no_capacity(built):
-    """The Platformer's light straight run and isomerate are made and consumed
-    inside the cascade. They must stay in the model to keep the yield chain
-    intact, but must not get an inventory constraint."""
+    """The Platformer's light straight run is made and consumed inside the
+    cascade. It must stay in the model to keep the yield chain intact, but must
+    not get an inventory constraint.
+
+    The isomerate *run* 9501 used to be here too and is deliberately gone. Its
+    only consumer was `PLATFORMER#106`, which operations confirmed is not a run
+    the plant makes, so with that line retired nothing charges 9501 and it stops
+    being a product. Its production is not lost: the yield rule still names it,
+    and `production_alias` books it into 1128's tank, which is where the
+    workbook puts it.
+    """
     _, _, _, spec = built
-    for code in ("9505", "9501"):
-        assert code in spec.products, "{} vanished from the model".format(code)
-        assert spec.products[code]["tanked"] is False
-        assert spec.products[code]["capacity"] == 0.0
+    assert "9505" in spec.products, "9505 vanished from the model"
+    assert spec.products["9505"]["tanked"] is False
+    assert spec.products["9505"]["capacity"] == 0.0
+
+    assert "9501" not in spec.products
+    assert spec.production_alias.get("9501") == "1128"
+    assert any(r.get("out") == "9501" and r["charge_line"] == "PLATFORMER#103"
+               for r in spec.yield_rules), "the isomerate run must still be made"
     # everything with a real block stays tanked
     assert spec.products["9711"]["tanked"] is True
     assert spec.products["DSL"]["tanked"] is True
@@ -585,6 +602,60 @@ def test_every_exit_from_the_plant_has_somewhere_to_get_a_price(built):
     priced = sum(d for c, d in demand.items()
                  if any(e["code"] == c and e["exit"] == "demand" for e in found))
     assert priced == pytest.approx(sum(demand.values()))
+
+
+def test_every_line_that_drains_a_tank_can_be_seen_by_the_simulator(built):
+    """A line the model moves material through must move it in the replay too.
+
+    The optimizer's balance says a charge line consumes its product. The
+    simulator moves material only where a block's rows reach out and *name* that
+    line, through the `Charge` lookup, a `to_diesel` row that sees only
+    TRANSFER_DIESEL lines, or an explicit row reference. Nothing checked that
+    the two agree, and four lines did not: three blocks - platformate, isomerate
+    and Kendex 0866 - carry `Production Out: charge_first_match code null`, so
+    the lookup found nothing however many lines pointed at them.
+
+    The optimizer drew those tanks and the replay drew nothing, which creates
+    oil on the planner side. It stayed hidden because all four carried zero
+    volume; the first schedule to route anything down them would have shipped
+    material out of a tank that never emptied.
+
+    Asserted against the engine's own lookup rules rather than by perturbing the
+    schedule, so it stays true for a product whose tank happens to be empty.
+    """
+    ref, _, _, spec = built
+
+    lookup = [l for l in ref.charge_lines if l.get("in_charge_lookup_range")]
+    to_diesel = [l for l in ref.charge_lines if l["unit"] == "TRANSFER_DIESEL"]
+    by_row = {l["row"]: l for l in ref.charge_lines}
+
+    reached = set()
+    for block in ref.blocks:
+        for meta in block["rows"].values():
+            for region in (meta.get("regions") or []):
+                for term in region["spec"]["terms"]:
+                    kind, code = term.get("kind"), term.get("code")
+                    if kind == "charge_first_match" and code:
+                        reached.update(l["key"] for l in lookup if l["code"] == code)
+                    elif kind == "to_diesel" and code:
+                        reached.update(l["key"] for l in to_diesel
+                                       if l["code"] == code)
+                    elif kind == "charge_row":
+                        line = by_row.get(term.get("row"))
+                        if line:
+                            reached.add(line["key"])
+
+    orphans = []
+    for line in spec.charge_lines:
+        product = spec.products.get(line["product"]) or {}
+        if not product.get("tanked"):
+            continue          # an untanked pass-through has no tank to drain
+        if line["key"] not in reached:
+            orphans.append((line["key"], line["product"]))
+
+    assert not orphans, (
+        "these lines drain a tank in the model and nothing in the replay: "
+        + ", ".join("{} (feed {})".format(k, p) for k, p in orphans))
 
 
 def test_a_product_downgrades_to_one_outlet_only(built):
