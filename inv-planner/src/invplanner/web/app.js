@@ -47,7 +47,14 @@ const fmtK = (n) => {
 };
 const shortDate = (iso) => {
   const [y, m, d] = iso.split('-');
-  return `${+m}/${d}/${y.slice(2)}`;
+  return `${+m}/${+d}/${y.slice(2)}`;
+};
+// Chart axes tick once a month, so the day would be noise. ISO reads as a
+// sort key rather than a date on an axis - `26-07` in particular gets read as
+// a year first.
+const monthYear = (iso) => {
+  const [y, m] = iso.split('-');
+  return `${+m}/${y.slice(2)}`;
 };
 
 async function api(path, opts) {
@@ -221,7 +228,7 @@ async function loadDashboard() {
 
   $('#dash-title').textContent = d.title;
   $('#dash-blurb').textContent =
-    `${d.blurb} — ${d.from} to ${d.to}`;
+    `${d.blurb} — ${shortDate(d.from)} to ${shortDate(d.to)}`;
 
   const host = $('#dash-sections');
   if (!d.sections.length) {
@@ -310,7 +317,7 @@ function miniChart(p) {
       lastMonth = m;
       if (i > 0) parts.push(line(x(i), P.t, x(i), H - P.b, 'var(--border)', 1));
       parts.push(`<text class="axis-text" x="${x(i) + 3}" y="${H - 3}">`
-        + `${iso.slice(2, 7)}</text>`);
+        + `${monthYear(iso)}</text>`);
     }
   });
 
@@ -453,7 +460,7 @@ function drawChart(d) {
     if (m !== lastMonth) {
       lastMonth = m;
       parts.push(line(x(i), P.t, x(i), H - P.b, 'var(--border)', 1));
-      parts.push(`<text class="axis-text" x="${x(i) + 4}" y="${H - P.b + 14}">${r.date.slice(0, 7)}</text>`);
+      parts.push(`<text class="axis-text" x="${x(i) + 4}" y="${H - P.b + 14}">${monthYear(r.date)}</text>`);
     }
   });
   // y labels
@@ -483,7 +490,7 @@ function drawProjTable(d) {
     const over = r.capacity > 0 && r.end > r.capacity;
     const neg = r.end < 0;
     return el('tr', {},
-      el('td', { class: 'sticky' }, r.date),
+      el('td', { class: 'sticky' }, shortDate(r.date)),
       el('td', { class: 'num' }, fmt(r.begin)),
       el('td', { class: 'num' }, fmt(r.production_in)),
       el('td', { class: 'num' }, fmt(r.sales)),
@@ -922,6 +929,23 @@ async function loadOptParams() {
     stat(p.time_limit_seconds, 'second solve limit', 'info'),
   );
 
+  // The two settings that are words, not numbers. Both have to be listed here
+  // or they are unreachable: a number box turns "cost" into NaN the first time
+  // it is touched, and a select falls back to its first option, so a value the
+  // list omits reads back as whichever one happens to be first. v2 was saved in
+  // the database and shown on screen as v1 for exactly that reason.
+  const CHOICES = {
+    model_version: {
+      v0: 'v0 — keep my assignments',
+      v1: 'v1 — decide MEK & extraction',
+      v2: 'v2 — also decide the hydrotreater (~5 min)',
+    },
+    objective: {
+      cost: 'cost — minimise what the plan gives up',
+      margin: 'margin — maximise what it earns',
+    },
+  };
+
   // Grouped, because these answer three different questions and a planner
   // filling one in is rarely touching the others.
   const GROUPS = [
@@ -933,7 +957,7 @@ async function loadOptParams() {
     ['How much freedom the model has', ['model_version', 'objective',
       'charge_floor_fraction', 'terminal_value_fraction', 'safety_stock_days',
       'horizon_days']],
-    ['Solver', ['time_limit_seconds', 'mip_gap']],
+    ['Solver', ['time_limit_seconds', 'mip_gap_abs', 'mip_gap']],
   ];
   const byField = Object.fromEntries(d.schema.map((f) => [f.field, f]));
 
@@ -944,16 +968,15 @@ async function loadOptParams() {
       const f = byField[field];
       const v = p[field];
       const needed = p.missing.includes(field);
-      // model_version is a string; a number input would silently turn it into
-      // NaN the first time anyone touched it.
-      const input = field === 'model_version'
+      const choices = CHOICES[field];
+      const input = choices
         ? el('select', {
             class: 'ovr-input set',
             onchange: (e) => saveOptParam(field, e.target.value, true),
           },
-          ['v1', 'v0'].map((opt) => el('option',
-            Object.assign({ value: opt }, (v || 'v1') === opt ? { selected: true } : {}),
-            opt === 'v1' ? 'v1 — decide MEK & extraction' : 'v0 — keep my assignments')))
+          Object.entries(choices).map(([opt, label]) => el('option',
+            Object.assign({ value: opt }, v === opt ? { selected: true } : {}),
+            label)))
         : el('input', {
             class: 'ovr-input' + (needed ? '' : ' set'),
             type: 'number', step: 'any',
