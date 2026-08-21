@@ -110,7 +110,31 @@ async function selectScenario(id) {
   for (let i = 0; i < state.scenario.horizon_days; i += 21) {
     offSel.appendChild(el('option', { value: i }, `day ${i + 1}`));
   }
+  refreshRunButton();
   await refreshActive();
+}
+
+/* The run button is in one view and the scenario picker is in the page header,
+   so nothing on screen told you which schedule you were about to solve. Opening
+   a run's result changes the selection silently, which is how a run ended up
+   solving the previous run's output. Name it on the button itself. */
+function refreshRunButton() {
+  const btn = $('#opt-run');
+  if (!btn) return;
+  const s = state.scenario;
+  if (!s) {
+    btn.textContent = 'Run optimizer';
+    return;
+  }
+  btn.textContent = `Run optimizer on “${s.name}”`;
+  const proposed = s.status === 'proposed';
+  btn.classList.toggle('warn', proposed);
+  btn.title = proposed
+    ? 'This schedule is itself an optimizer result. Re-solving one is not '
+      + 'supported: the charge floor is a fraction of whatever you feed in, so '
+      + 'each pass adds a new minimum on every line-day the last one created, '
+      + 'and the model goes infeasible. Pick the plan you started from.'
+    : 'Solves this schedule and writes the answer back as a new scenario';
 }
 
 function activeView() {
@@ -1124,6 +1148,21 @@ async function loadOptRuns() {
 
 async function runOptimizer() {
   if (!state.scenario) return;
+  // A result scenario cannot be re-solved - see `refreshRunButton`. Caught here
+  // rather than left to come back `no_solution` after a long solve, because the
+  // failure looks like a bad model and is really a bad starting point.
+  if (state.scenario.status === 'proposed') {
+    // Peel every layer: chained runs nest their names, so one pass would point
+    // at another result and send you round the loop again.
+    let from = state.scenario.name;
+    for (let prev = null; prev !== from; ) {
+      prev = from;
+      from = from.replace(/^Optimizer run \d+ \(from (.*)\)$/, '$1');
+    }
+    toast(`“${state.scenario.name}” is an optimizer result, so it cannot be `
+      + `re-solved. Select “${from}” — the schedule it came from — and run that.`);
+    return;
+  }
   toast('Solving…');
   try {
     await api('/api/optimizer/run', {
