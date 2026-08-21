@@ -98,6 +98,22 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # not spend; a stage one that finishes early buys stage two more time rather
     # than throwing it away.
     budget = float(params.get("time_limit_seconds") or 300.0)
+
+    # The floor. v0 keeps the planner's assignments and optimises only volumes
+    # and downgrades, so every schedule it can reach is one this model can reach
+    # too - and it proves optimality in about a second, the same answer every
+    # time. Solved first so the two stages have something to be measured
+    # against, and so a run that searches badly has somewhere to fall back to.
+    #
+    # This is not belt and braces. Neither stage proves optimality, so each
+    # returns whichever incumbent it held when its budget ran out, and how much
+    # search that buys depends on what else the machine was doing: the same
+    # model, the same parameters and the same seconds have returned 716,331 and
+    # 1,171,736 on different occasions. Without a floor a planner can ask for
+    # the better model and get a worse schedule, which is what happened.
+    floor_run = v0.solve(ref, scn, spec, dict(params, time_limit_seconds=120.0),
+                         horizon=horizon, downtime=downtime, **kw)
+
     first_params = dict(params, time_limit_seconds=max(1.0, budget * STAGE_ONE_SHARE))
 
     first = v0.solve(ref, scn, spec, first_params, horizon=horizon,
@@ -160,9 +176,54 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # This is presentation only: stage two's objective is right either way,
     # because the pinned schedule really does cost those changeovers.
     freed_somewhere = set(STAGE_ONE) | set(STAGE_TWO)
-    second.kpis["inherited_switches"] = {
-        u: n for u, n in (second.kpis.get("inherited_switches") or {}).items()
-        if u not in freed_somewhere}
+    kept = {u: n for u, n in (second.kpis.get("inherited_switches") or {}).items()
+            if u not in freed_somewhere}
+    dropped = sum(n for u, n in (second.kpis.get("inherited_switches") or {}).items()
+                  if u in freed_somewhere)
+    second.kpis["inherited_switches"] = kept
+    # The cash has to be filtered with the count or the two contradict each
+    # other: run 30 reported two inherited ROSE changeovers costing $120,000,
+    # because the figure still carried stage one's pinned units. Scaled by what
+    # was dropped rather than recomputed, since the per-arc price is not
+    # available here and an average is honest about being one.
+    cost = second.kpis.get("inherited_switch_cost") or 0.0
+    total = sum(kept.values()) + dropped
+    if total and dropped:
+        second.kpis["inherited_switch_cost"] = cost * sum(kept.values()) / total
+    # Take the floor if the two stages could not beat it. Compared on the
+    # objective because that is the only figure that prices every trade-off the
+    # model makes - lost sales against downgrade against changeovers - and both
+    # sides now compute it the same way.
+    # Cost is minimised and margin maximised, so "better" flips with the mode.
+    margin = str(params.get("objective") or "cost").lower() == "margin"
+    better = (floor_run.status in ("optimal", "feasible")
+              and floor_run.objective is not None
+              and second.objective is not None
+              and (floor_run.objective > second.objective if margin
+                   else floor_run.objective < second.objective))
+    if better:
+        floor_run.kpis["stages"] = [
+            {"units": list(STAGE_ONE), "status": first.status,
+             "seconds": round(first.solve_seconds, 1),
+             "objective": first.objective},
+            {"units": list(STAGE_TWO), "status": second.status,
+             "seconds": round(second.solve_seconds - first.solve_seconds, 1),
+             "objective": second.objective},
+        ]
+        floor_run.kpis["globally_optimal"] = False
+        floor_run.kpis["fell_back_to_v0"] = True
+        floor_run.solve_seconds = second.solve_seconds + floor_run.solve_seconds
+        floor_run.message = (
+            "{} the two stages returned {:,.0f}, which is worse than keeping "
+            "your assignments and optimising volumes alone ({:,.0f}), so that "
+            "is what this is. Neither stage proves optimality, so a run can "
+            "search badly; this one did."
+            .format(floor_run.message + "." if floor_run.message else "",
+                    second.objective, floor_run.objective)).strip()
+        return floor_run
+
+    second.kpis["fell_back_to_v0"] = False
+    second.kpis["floor_objective"] = floor_run.objective
     second.kpis["stages"] = [
         {"units": list(STAGE_ONE), "status": first.status,
          "seconds": round(first.solve_seconds, 1),
