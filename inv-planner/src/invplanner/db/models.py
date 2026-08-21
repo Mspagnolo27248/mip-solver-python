@@ -15,6 +15,7 @@ Runs on SQLite for local development and Postgres in deployment; set DATABASE_UR
 from __future__ import annotations
 
 import datetime as dt
+from typing import Optional
 
 from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey,
                         Index, Integer, String, Text, UniqueConstraint)
@@ -26,6 +27,23 @@ Base = declarative_base()
 
 def _now() -> dt.datetime:
     return dt.datetime.utcnow()
+
+
+def as_utc(when: Optional[dt.datetime]) -> Optional[str]:
+    """A stored timestamp as ISO text that says which zone it is in.
+
+    Everything here is written with `utcnow()`, so the value is UTC - but it is
+    *naive*, and `.isoformat()` on a naive datetime produces no offset. The
+    browser's `new Date(...)` reads a bare string as **local** time, so a run
+    started at 18:16 in New York was displayed as 18:16 UTC rendered local,
+    four hours out. Stamping the offset is what lets `toLocaleString()` put it
+    back in the reader's own zone.
+    """
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return when.isoformat()
 
 
 # --------------------------------------------------------------------- feeds

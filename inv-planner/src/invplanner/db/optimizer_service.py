@@ -11,7 +11,7 @@ from ..modelprep import build
 from ..optimizer import v0, v1, v2, verify
 from . import service as svc
 from .models import (AuditEvent, OptimizerParams, OptimizerRun, Scenario,
-                     ScheduleEntry)
+                     ScheduleEntry, as_utc)
 
 
 # ------------------------------------------------------------------ parameters
@@ -312,7 +312,7 @@ def list_runs(db: Session, limit: int = 25) -> List[Dict[str, Any]]:
             .limit(limit).all())
     names = {s.id: s.name for s in db.query(Scenario)}
     return [{
-        "id": r.id, "created_at": r.created_at.isoformat(),
+        "id": r.id, "created_at": as_utc(r.created_at),
         "created_by": r.created_by, "status": r.status, "message": r.message,
         "solver": r.solver, "solve_seconds": r.solve_seconds,
         "objective": r.objective, "kpis": r.kpis,
