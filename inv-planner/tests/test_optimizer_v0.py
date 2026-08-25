@@ -744,3 +744,104 @@ def test_safety_stock_holds_a_floor_without_outranking_a_customer(solved):
     # and it never buys stock with someone else's order
     assert on.kpis["lost_sales_gal"] <= _solve(
         solved, safety_stock_days=0).kpis["lost_sales_gal"] + 1.0
+
+
+# --------------------------------------------- the reactor is held, not just fed
+def _reactor_visits(res, spec, dates):
+    """Length of every stretch the hydrotreater spends on one reactor.
+
+    Read off the setup state rather than production, and carried through idle
+    days: a reactor holds its last feed while the unit sits, so an idle day
+    continues a visit rather than ending one.
+    """
+    from invplanner import model_config as cfg
+    rof = {l["key"]: cfg.reactor_of("HYDRO", l["workbook_product"])
+           for l in spec.charge_lines if l["unit"] == "HYDRO"}
+    visits, held = [], None
+    for d in dates:
+        line = (res.schedule.get("HYDRO") or {}).get(d.isoformat())
+        if line is not None:
+            held = rof.get(line, held)
+        if held is None:
+            continue
+        if visits and visits[-1][0] == held:
+            visits[-1][1] += 1
+        else:
+            visits.append([held, 1])
+    return visits
+
+
+def test_the_hydrotreater_holds_a_reactor_once_it_goes_there(solved):
+    """4315 and 4319 are grouped because the reactor is held, not because it pays.
+
+    The plant does not come off the dedicated reactor to run a Kensol and go
+    straight back, and for a long time nothing in the model said so. The flush
+    made a crossing cost 0.375 day against 0.125, which the docs predicted would
+    group the two R1 products on its own. It did not: run 33 crossed 18 times
+    against the plan's 13.
+
+    A minimum on the charge *line* does not fix it either - that lengthens a
+    visit while leaving the model free to leave and return, and measured at
+    R1 3 / R2 2 over 42 days it took 6 crossings against 3 with no minimum at
+    all. The rule is about the reactor, so the constraint is too.
+
+    Only a visit *entered inside the window* can owe a minimum, so two are
+    exempt and both for the same reason - the window edge, not a decision:
+
+      * the first, when the unit opens already on the reactor. `day_zero` for the
+        hydrotreater is 9705, which is R1, so it habitually does; the visit began
+        before the window and how long it has already run is not knowable here.
+      * the last, when it runs to the final day. It cannot be proven to complete,
+        but the constraint still holds it rather than letting it be abandoned -
+        which is why this does not take `minrun`'s exemption. Skipping instead of
+        clamping let the model enter R1 on day 16 of 18, run one day and leave
+        for R2, a one-day visit with two clear days after it.
+
+    Not solved at the module's 14 days: there the only R1 visit is the truncated
+    one at the end, so every assertion below would be vacuously true. Nor pinned
+    to one longer horizon - which window happens to hold a complete visit moves
+    whenever the constraint set does, and a test that silently stops proving
+    anything is worse than one that fails. So it scans, takes the first window
+    that yields an interior visit, and fails if none of them does.
+    """
+    from invplanner import model_config as cfg
+    from invplanner.engine import simulate
+    from invplanner.modelprep import build
+    from invplanner.optimizer import v0
+    ref, scn, _, _, _ = solved
+    down = {u: cfg.turnaround_days(u) for u in cfg.TURNAROUNDS}
+    sim = simulate(ref, scn, physical=True)
+    need = cfg.min_reactor_visit_days("HYDRO", "R1")
+
+    for days in (32, 35, 26, 28):
+        dates = scn.dates[:days]
+        spec = build(ref, scn, sim, horizon=dates, downtime=down)
+        res = v0.solve(ref, scn, spec, dict(PARAMS, horizon_days=days,
+                                            charge_floor_fraction=0.30),
+                       horizon=dates, downtime=down, free_units=["HYDRO"])
+        assert res.status == "optimal", "{}d: {}".format(days, res.status)
+        visits = _reactor_visits(res, spec, dates)
+        interior = [n for i, (r, n) in enumerate(visits)
+                    if r == "R1" and 0 < i < len(visits) - 1]
+        if not interior:
+            continue
+        short = [n for n in interior if n < need]
+        assert not short, "{}d: R1 visits of {} days, minimum is {}".format(
+            days, short, need)
+        return
+
+    assert False, "no window held a complete R1 visit - the test proves nothing"
+
+
+def test_a_unit_with_one_reactor_gains_no_visit_constraint(solved):
+    """The visit rule must not leak onto units that never asked for one.
+
+    `min_reactor_visit_days` returns 1 for anything without a figure, and 1 is
+    the same "no constraint" convention `min_run_days` uses - so extraction and
+    MEK build exactly the model they built before.
+    """
+    from invplanner import model_config as cfg
+    assert cfg.min_reactor_visit_days("MEK", "R1") == 1
+    assert cfg.min_reactor_visit_days("EXTRACT", "R1") == 1
+    assert cfg.min_reactor_visit_days("HYDRO", "R2") == 1
+    assert cfg.min_reactor_visit_days("HYDRO", "R1") > 1

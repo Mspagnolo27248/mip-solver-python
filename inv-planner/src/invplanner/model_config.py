@@ -322,6 +322,31 @@ MIN_RUN_DAYS_BY_LINE: Dict[str, Dict[str, int]] = {
         "EXTRACT#90": 2,    # 7 campaigns, median 3 days  (9305 normal)
         "EXTRACT#91": 1,    # 9 campaigns, median 4 days  (9305 deep)
     },
+    #: From operations, not from the plan. The workbook's own HYDRO campaigns run
+    #: a median of 1-2 days per charge, and that was read for a long time as the
+    #: plant switching the unit daily - `MARGIN-AND-CAMPAIGNS.md` says so, citing
+    #: "93 of its 98 changeovers are back to back". That figure answers a
+    #: different question: it comes from the idle-gap section of
+    #: `switching-analysis.md` and means a changeover with no idle day inside it,
+    #: not a campaign one day long. The unit is not run in one-day campaigns.
+    #:
+    #: This is the second half of the reactor rule, not a replacement for it.
+    #: `min_visit_days` holds the unit on a reactor; this holds it on a charge.
+    #: With only the first, a 4-day R1 visit was free to bounce between 9704 and
+    #: 9705 and R2 was unconstrained entirely - the 100-day run came back with 59
+    #: campaigns at a median of 1 day, worse line-level churn than the 43 it had
+    #: before the reactor rule went in.
+    "HYDRO": {
+        "HYDRO#77": 3,      # 9705 Kendex 0847 - R1
+        "HYDRO#84": 3,      # 9704 Kendex 0150 - R1
+        "HYDRO#76": 2,      # 9713 No.2 diesel charge
+        "HYDRO#78": 2,      # 8170 onroad diesel
+        "HYDRO#79": 2,      # 8175 NRLM diesel
+        "HYDRO#80": 2,      # 9711 Kensol 48
+        "HYDRO#81": 2,      # 9712 Kensol 50
+        "HYDRO#82": 2,      # 9703 Kensol 61
+        "HYDRO#83": 2,      # 9720 dewaxed unext LN
+    },
 }
 
 #: v2. The hydrotreater has no ladder: 36 of its 42 possible transitions appear
@@ -390,6 +415,24 @@ UNIT_REACTORS: Dict[str, Dict[str, Any]] = {
             "R2": {"charges": ["9713", "9705x", "8170", "8175", "9711", "9712",
                                "9703", "9720"]},
         },
+        #: Days the unit stays on a reactor once it goes there, from operations.
+        #:
+        #: This is a rule about the *reactor*, not about a charge line, and the
+        #: difference is the whole point. `MIN_RUN_DAYS` says "once 9704 starts,
+        #: run it three days" - which lengthens a visit and does nothing to stop
+        #: the unit leaving R1 for a Kensol and coming straight back. Tried at
+        #: R1 3 / R2 2 over 42 days it did exactly that: visits got longer *and*
+        #: more numerous, 6 crossings against 3 with no minimum at all.
+        #:
+        #: Four days is the plan's own median R1 visit measured as reactor time
+        #: (7 visits over 100 days), and operations confirm the unit is not run
+        #: in shorter ones. Holding the reactor is what puts 9704 and 9705 in the
+        #: same visit, which is the grouping the plant describes - as structure,
+        #: rather than hoping a changeover price buys it.
+        #:
+        #: R2 carries no minimum: it is the general reactor and the state the
+        #: unit sits in, and the plan really does turn its Kensol grades quickly.
+        "min_visit_days": {"R1": 4},
         "evidence": (
             "Derived independently from the yield rules: 9704 makes 4315 and "
             "9705 makes 4319. The plan crosses reactors 20 times a year (1.6 a "
@@ -1029,6 +1072,19 @@ def reactor_of(unit: str, product: str) -> Optional[str]:
             return name
     # Anything not named explicitly runs on the general reactor.
     return "R2" if "R2" in spec["reactors"] else None
+
+
+def min_reactor_visit_days(unit: str, reactor: str) -> int:
+    """Days a unit must stay on a reactor once it goes there.
+
+    1 means no constraint - the same convention `min_run_days` uses, and the
+    value that leaves the formulation untouched for every unit but the one that
+    names a figure.
+    """
+    spec = UNIT_REACTORS.get(unit)
+    if not spec:
+        return 1
+    return int((spec.get("min_visit_days") or {}).get(reactor, 1))
 
 
 def changeover_loss_days(unit: str, frm: str, to: str) -> float:

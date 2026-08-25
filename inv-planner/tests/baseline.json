@@ -254,9 +254,9 @@
         "switches": 6
       },
       "HYDRO": {
-        "campaigns": 14,
+        "campaigns": 15,
         "median_days": 3,
-        "switches": 13
+        "switches": 14
       },
       "MEK": {
         "campaigns": 10,
@@ -264,20 +264,20 @@
         "switches": 9
       }
     },
-    "charge_bbl": 594003,
+    "charge_bbl": 594579,
     "charge_by_unit": {
       "EXTRACT": 72391,
-      "HYDRO": 153194,
+      "HYDRO": 153770,
       "MEK": 114442,
       "PLATFORMER": 210161,
       "ROSE": 43814
     },
     "days": 42,
-    "downgrade_gal": 2491387,
+    "downgrade_gal": 2499611,
     "exact": false,
     "horizon_truncated_days": 0,
     "hydro": {
-      "both_reactor_days": 3,
+      "both_reactor_days": 1,
       "startups": 6
     },
     "lost_by_product": {
@@ -287,6 +287,6 @@
     "schedule_gaps": 3,
     "sink_offtake_gal": 0,
     "status": "feasible",
-    "terminal_shortfall_gal": 465846
+    "terminal_shortfall_gal": 553952
   }
 }

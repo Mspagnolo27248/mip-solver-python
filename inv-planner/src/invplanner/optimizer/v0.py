@@ -614,6 +614,11 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     #: belongs to and what feed sits at each end of it.
     arc_cost: Dict[tuple, float] = {}
     day_zero: Dict[str, str] = {}
+    #: line -> the reactor it runs on, and unit -> the reactors that name a
+    #: minimum visit. Both empty for a unit with one reactor or none, which is
+    #: what keeps the visit constraint off every unit that has not asked for it.
+    reactor_of_line: Dict[str, Optional[str]] = {}
+    visit_reactors: Dict[str, List[str]] = {}
     for unit in sorted(free):
         ulines = [l for l in lines if l["unit"] == unit]
         keys = [l["key"] for l in ulines]
@@ -623,6 +628,16 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                 for l in ulines}
         minrun = {l["key"]: cfg.min_run_days_for_line(
             unit, l["key"], l["workbook_product"]) for l in ulines}
+        reactor_of_line.update({l["key"]: cfg.reactor_of(unit,
+                                                         l["workbook_product"])
+                                for l in ulines})
+        # Only a unit that actually has two reactors here can cross between
+        # them, so only that unit can owe a minimum visit.
+        on_unit = sorted({r for r in (reactor_of_line[l["key"]] for l in ulines)
+                          if r})
+        visit_reactors[unit] = [r for r in on_unit
+                                if len(on_unit) > 1
+                                and cfg.min_reactor_visit_days(unit, r) > 1]
         minrate = {l["key"]: rate[l["key"]] * cfg.min_rate_fraction(
             unit, l["workbook_product"]) for l in ulines}
         feed = {l["key"]: l["workbook_product"] for l in ulines}
@@ -798,6 +813,43 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                 for w in iso[i:i + L]:
                     prob += setup[(k, w)] >= entering, \
                         "minrun_{}_{}_{}".format(k.replace("#", "_"), s, w)
+
+            # And the same thing one level up: a unit that goes to a reactor
+            # stays on it.
+            #
+            # The line-level minimum above cannot express this. It says how long
+            # a *charge* runs, so it lengthens a visit while leaving the model
+            # free to leave R1 for a Kensol and come straight back - measured at
+            # R1 3 / R2 2 over 42 days, that is exactly what it did, taking 6
+            # crossings against 3 with no minimum at all. The plant's rule is
+            # about the reactor, so the constraint has to be too.
+            #
+            # A reactor's state is not a variable here: the freed formulation
+            # carries the flush in the arc costs and builds no `ron` binary, the
+            # way the fixed-assignment branch does. It does not need one - the
+            # setups sum to one a day, so the setups of a reactor's lines sum to
+            # exactly the indicator "the unit is on this reactor today", and
+            # entering the reactor is the crossing arcs into it. Both are already
+            # built, so this adds constraints and no variables.
+            # Clamped to the window rather than skipped near its end, which is
+            # where this parts company with `minrun` above. Skipping lets a visit
+            # begun inside the last L days escape the rule entirely, and the
+            # model takes that: at 18 days it went to R1 on day 16, ran one day
+            # and left for R2 - a one-day visit with two clear days after it,
+            # which is the exact behaviour the constraint exists to forbid. A
+            # visit that cannot be proven to complete must still not be
+            # abandoned, so it is held to the end of the window instead.
+            for r in visit_reactors.get(unit, ()):
+                L = cfg.min_reactor_visit_days(unit, r)
+                if L <= 1:
+                    continue
+                mine = [k for k in keys if reactor_of_line[k] == r]
+                entering = pulp.lpSum(
+                    arc[((p, k), s)] for (p, k) in arcs
+                    if k in mine and reactor_of_line.get(p) != r)
+                for w in iso[i:i + L]:
+                    prob += pulp.lpSum(setup[(k, w)] for k in mine) >= entering, \
+                        "minvisit_{}_{}_{}_{}".format(unit, r, s, w)
 
     # ------------------------------------------------- flow-through identities
     # No tank means no buffer: an untanked intermediate is made and consumed in
