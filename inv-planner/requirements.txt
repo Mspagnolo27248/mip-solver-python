@@ -1,2 +1,13 @@
-openpyxl>=3.0.9
-pytest>=6.0
+# What the app actually imports. The lower bounds are the versions this has been
+# run against, not the oldest that would work - nobody has tested older ones.
+#
+# This file used to list only openpyxl and pytest, which was enough on the
+# machine it was written on: Anaconda's base environment already carried the
+# rest, so `pip install -r requirements.txt` appeared to work and a fresh clone
+# could not run the app at all.
+openpyxl>=3.0.9        # workbook import and the schedule export
+pulp>=2.7.0            # the MIP; ships its own CBC binary
+sqlalchemy>=1.4.22     # scenarios, staging, runs - SQLite by default
+fastapi>=0.111.0       # the API the dependency-free front end talks to
+uvicorn>=0.30.1        # the server `scripts/run_api.py` starts
+pytest>=6.0            # tests only
