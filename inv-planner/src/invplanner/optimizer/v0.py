@@ -1453,10 +1453,28 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         )
 
     t0 = time.time()
-    # `warmStart` only bites when there are binaries to seed. Proving optimality
-    # on this model is expensive and not worth paying for: the objective is
-    # nearly flat across many schedules, so the last fraction of a percent costs
-    # far more search than it is worth to a planner. Take the gap.
+    # `warmStart` only bites when there are binaries to seed - and on Windows it
+    # does not bite at all. PuLP writes the seed to a `.mst` file beside the
+    # model, which `create_tmp_files` only names when `keepFiles` is set, so the
+    # flag below is silently discarded on this platform. pulp 2.7 says nothing;
+    # 3.3.1 warns.
+    #
+    # **Left inert deliberately, not by accident.** Turning it on properly
+    # (`keepFiles=True`) was measured on the 42-day model with the hydrotreater
+    # freed: identical incumbent, 482,267.01 both ways, and 612s against 300s to
+    # reach it. The seed is the planner's own schedule, which the charge floor
+    # already keeps the search near, so it tells CBC little it does not know.
+    # `keepFiles` also writes the `.lp`, `.mst` and `.sol` into the working
+    # directory and never removes them, which would litter the repo on every
+    # freed solve including the whole test suite.
+    #
+    # So: no benefit, real cost, and it stays as it is. Anyone tempted to fix
+    # the warning should reproduce that measurement first.
+    #
+    # Proving optimality on this model is expensive and not worth paying for:
+    # the objective is nearly flat across many schedules, so the last fraction
+    # of a percent costs far more search than it is worth to a planner. Take the
+    # gap.
     #
     # **The absolute gap is the one that means anything here, and it is the one
     # to set.** A cost objective measures value *given up*, so it shrinks toward
