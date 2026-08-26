@@ -558,23 +558,58 @@ at any price.
 
 So the structural lever carries the load, and the cash term trims what is left.
 
-### HYDRO has no structural lever available, and cannot be given one
+### CORRECTED: HYDRO's structural lever was there all along
 
-`MIN_RUN_DAYS` (`model_config.py:972-978`) covers MEK, EXTRACT and ROSE. HYDRO is
-absent, and the first instinct — fill it in before v2 frees the unit — turns out to
-be impossible. **All twelve HYDRO charges have an observed minimum campaign of one
-day** (`data/reports/transition-analysis.md`), and `min_run_days` already returns 1
-as its fallback. An entry for HYDRO would be a literal no-op.
+This section used to say the hydrotreater had no minimum campaign to discover, and
+that the cash lever was therefore the only brake it could ever have. **Both claims
+were wrong, and the reasoning is worth keeping because of how it failed.**
 
-That is not a data gap to be closed later. The plant genuinely runs the
-hydrotreater in one-day campaigns — 93 of its 98 changeovers are back to back, more
-than the other three units combined — so there is no minimum to discover.
+What it said: all twelve HYDRO charges have an observed minimum campaign of one day
+(`data/reports/transition-analysis.md`), so an entry in `MIN_RUN_DAYS` would be a
+no-op — and that this was not a data gap, because "the plant genuinely runs the
+hydrotreater in one-day campaigns — 93 of its 98 changeovers are back to back."
 
-The consequence is the reason the cash lever had to be built. **On HYDRO the
-per-unit changeover cost is the only brake that exists.** It is also the unit where
-the brake is least able to hold: a cash penalty is bought out by a wide enough
-margin spread, and HYDRO is the unit whose freedom v2 is about to open up. Expect
-to calibrate it there first and to distrust the result longest.
+Three errors, compounding:
+
+1. **The 93-of-98 figure answers a different question.** It comes from the idle-gap
+   section of `data/reports/switching-analysis.md`, where "back to back" means a
+   changeover with no idle day inside it, as opposed to one where the unit sits
+   down and restarts on something else. It says nothing about how long a campaign
+   runs. It cannot support a claim about campaign length.
+2. **A minimum of one day is nearly vacuous.** Every charge that ever ran a single
+   day once has an observed minimum of one. The medians are 1-2 days; the argument
+   needed those, and they are still a fact about the workbook rather than the unit.
+3. **The plan is not a record of how the plant runs.** Operations say the
+   hydrotreater is not run in one-day campaigns. The short campaigns in the
+   workbook are an artifact of how charge is entered day by day.
+
+The cost of believing it: HYDRO was the only unit in the model with no minimum
+campaign, `v2.py` records it as the unit that cannot be solved because "there is
+nothing to prune the tree with", and a 100-day run came back with 43 campaigns at a
+median of 2 days and 18 reactor crossings against the plan's 13.
+
+What is true now. Two constraints, doing different jobs:
+
+* `UNIT_REACTORS["HYDRO"]["min_visit_days"]` (`model_config.py:435`) holds the unit
+  on a **reactor** for four days once it goes there. This is the rule operations
+  actually state — 4315 and 4319 are grouped and the unit does not come off R1 to
+  run a Kensol and go back — and it is a rule about the reactor, which no per-line
+  minimum can express.
+* `MIN_RUN_DAYS_BY_LINE["HYDRO"]` (`model_config.py:318`) holds it on a **charge**,
+  3 days on the R1 lines and 2 on R2.
+
+Both were needed. With only the reactor rule, a four-day visit was free to bounce
+between 9704 and 9705 and R2 was unconstrained, and line churn got *worse* than
+before. With both, the 100-day run takes 12 crossings against the plan's 13, in 7
+reactor visits of median 5 days against the plan's 7 of median 4, with lost sales
+unchanged.
+
+**So the claim in the paragraph above this section — that a min-run constraint
+cannot be bought out at any price, and the cash term only trims what is left — is
+right, and applies to HYDRO too.** The unit that was said to have no structural
+lever turned out to need two of them. The cash lever was never calibrated here and
+`SWITCH_COST_BY_ARC` is still empty; see `scripts/analyze_reactor_cost.py` for why
+the sweep that would have set it could not be run.
 
 ### Settled: ROSE's minimum is 3 days, and the 20-day measurement is emergent
 

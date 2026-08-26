@@ -16,10 +16,22 @@ shorter than a single ROSE campaign, so a rolling horizon built on it would deci
 a 40-day campaign seven days at a time.
 
 **Why the hydrotreater is the hard one.** It offers 7 charge lines against MEK's
-and extraction's 4, and 42 transitions against their 6 and 9 - and unlike them it
-has no minimum campaign anywhere, because every one of its charges is observed
-running for a single day. There is nothing to prune the tree with. The plant really
-does switch it daily.
+and extraction's 4, and 42 transitions against their 6 and 9.
+
+This used to add "and unlike them it has no minimum campaign anywhere, because
+every one of its charges is observed running for a single day - the plant really
+does switch it daily". That was wrong on both halves. The observed minimum of one
+day is nearly vacuous, the medians are 1-2 days and describe the workbook rather
+than the unit, and operations say it is not run that way. The unit had no minimum
+because nobody had asked for one, and *that* is what left nothing to prune the tree
+with - see `MARGIN-AND-CAMPAIGNS.md`, "HYDRO's structural lever was there all
+along", for how the mistake was made and found.
+
+It has two now: a minimum reactor visit and per-line minimum campaigns. They cut
+the search enormously - 42 days with the hydrotreater freed went from never proving
+optimality inside 900s to proving it in about three seconds on the reactor rule
+alone. The per-line minimums give some of that back, so this is better than it was
+and not solved.
 
 **What does not fix it**, all tried and measured:
 
