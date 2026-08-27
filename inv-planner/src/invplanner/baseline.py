@@ -27,9 +27,15 @@ marked `exact: false`. They are still worth diffing - the solve is deterministic
 verified by three identical runs - but an objective delta on a v1 row is not
 evidence that anything improved. Read those rows for *structure*: status, campaign
 shape, how often a unit switches.
+
+**A case may be one the model cannot answer.** `solves: False` says the expected
+result is `infeasible`, and the row then carries which constraint families needed
+relief instead of a schedule. `v0-42-blank` is the one: a limitation worth pinning
+is still an answer, and the point of recording it is to see the day it changes.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List
 
 from . import model_config as cfg
@@ -77,6 +83,22 @@ CASES: List[Dict[str, Any]] = [
     # drift without anyone noticing.
     {"name": "v2-42-cost", "model": "v2", "days": 42, "exact": False,
      "params": {"objective": "cost"}},
+    # The blank sheet: every charge line emptied, crude left running because it
+    # is an input to the model and not a decision. This is not a corner case, it
+    # is what a planner opening a new window has, and the model cannot answer it
+    # - a fixed-assignment line gets a charge variable only on days the schedule
+    # already names one (`v0.py`, "assignment fixed: not scheduled"), so with
+    # nothing typed in, the Platformer cannot run at all, crude keeps making
+    # 144,072 gal/day of naphtha nobody can consume, and the tank is over
+    # capacity on day 9. Freeing the Platformer instead is not available either:
+    # two of its four lines carry no maximum rate.
+    #
+    # Recorded so the day that changes is visible. `infeasible` here is the
+    # current answer, not the desired one - if this row ever solves, someone has
+    # made the model able to plan from nothing, and that is worth reading the
+    # diff for rather than discovering later.
+    {"name": "v0-42-blank", "model": "v0", "days": 42, "exact": True,
+     "blank_schedule": True, "solves": False, "params": {"objective": "cost"}},
 ]
 
 #: Gallons and barrels are rounded to whole units and the objective to cents.
@@ -175,7 +197,45 @@ def _campaigns(res) -> Dict[str, Any]:
     return out
 
 
+def _blank(scn: Scenario) -> Scenario:
+    """The same scenario with nothing scheduled on any charge line.
+
+    The crude rate is left alone deliberately. Crude is a fixed input rather
+    than a decision, so zeroing it too asks a different and much emptier
+    question: with no feed the plant has nothing to plan, and the run comes back
+    "optimal" having idled everything except the two flow-through lines.
+    """
+    data = copy.deepcopy(scn.raw)
+    data["charge_schedule"]["lines"] = {
+        key: {} for key in data["charge_schedule"]["lines"]}
+    return Scenario(data)
+
+
+def _why_infeasible(ref, scn, spec, params, dates, down) -> Dict[str, Any]:
+    """Which constraint families a failed run needed relief from, and how much.
+
+    A bare `infeasible` is a status, not a reason, and this file exists to hold
+    rows that explain themselves. One elastic v0 solve answers it: v1 and v2
+    build on v0's constraint set, so the families are the same whichever tier
+    asked, and diagnosing with v0 keeps this to a single extra solve rather than
+    a second staged run.
+    """
+    res = v0.solve(ref, scn, spec, dict(params, mip_gap=0.0), horizon=dates,
+                   downtime=down, elastic=True)
+    out: Dict[str, Any] = {}
+    for family, info in sorted((res.binding or {}).items()):
+        worst = (info.get("worst") or [[None]])[0][0]
+        out[family] = {"count": info["count"], "gal": _g(info["total"]),
+                       # "9103_2026-09-02" -> the product, which is the half that
+                       # names the problem; the date only says when it starts.
+                       "worst": worst.rsplit("_", 1)[0] if worst else None}
+    return out
+
+
 def run_case(case: Dict[str, Any], ref, scn, sim, down) -> Dict[str, Any]:
+    if case.get("blank_schedule"):
+        scn = _blank(scn)
+        sim = simulate(ref, scn, physical=True)
     dates = scn.dates[:case["days"]]
     spec = build(ref, scn, sim, horizon=dates, downtime=down)
     params = dict(COMMON, horizon_days=case["days"],
@@ -184,6 +244,12 @@ def run_case(case: Dict[str, Any], ref, scn, sim, down) -> Dict[str, Any]:
     res = model.solve(ref, scn, spec, params, horizon=dates, downtime=down)
 
     row: Dict[str, Any] = {"status": res.status, "exact": case["exact"]}
+    if res.status not in ("optimal", "feasible"):
+        # Nothing below this has anything to read: an unsolved run carries no
+        # charge, no KPIs and no schedule, so the row would be a page of zeros
+        # with the one fact that matters buried in it.
+        row["binding"] = _why_infeasible(ref, scn, spec, params, dates, down)
+        return row
     if case["exact"]:
         # Only a proven optimum has an objective worth comparing. Recording one
         # for a time-limited incumbent invites exactly the mistake this file

@@ -112,6 +112,17 @@
     "status": "optimal",
     "terminal_shortfall_gal": 5616463
   },
+  "v0-42-blank": {
+    "binding": {
+      "capacity": {
+        "count": 100,
+        "gal": 96957057,
+        "worst": "9103"
+      }
+    },
+    "exact": true,
+    "status": "infeasible"
+  },
   "v0-42-cost": {
     "charge_bbl": 590145,
     "charge_by_unit": {

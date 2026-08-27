@@ -106,7 +106,7 @@ python scripts/snapshot.py         # did the model's answers move?
 
 ### After changing anything in the model
 
-`tests/baseline.json` records what the optimizer answers on eight fixed cases, and
+`tests/baseline.json` records what the optimizer answers on ten fixed cases, and
 `scripts/snapshot.py` diffs against it. Run it after any change to the objective,
 the constraints or the configuration:
 

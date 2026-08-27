@@ -55,7 +55,16 @@ def test_only_proven_optima_carry_a_comparable_objective(current):
     makes is smaller than the gap, and a safety-stock experiment that "recovered
     43,705 gal" turned out to be exactly that.
     """
+    from invplanner.baseline import CASES
+    cases = {c["name"]: c for c in CASES}
     for name, row in current.items():
+        if not cases[name].get("solves", True):
+            # A case whose whole content is that the model cannot answer it. It
+            # has no objective to compare because it has no schedule behind it,
+            # and the status is the assertion - see `v0-42-blank`.
+            assert row["status"] == "infeasible", (name, row["status"])
+            assert "objective" not in row, name
+            continue
         if row["exact"]:
             assert row["status"] == "optimal", (name, row["status"])
             assert row.get("objective") is not None, name
