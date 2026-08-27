@@ -10,4 +10,5 @@ pulp>=2.7.0            # the MIP; ships its own CBC binary
 sqlalchemy>=1.4.22     # scenarios, staging, runs - SQLite by default
 fastapi>=0.111.0       # the API the dependency-free front end talks to
 uvicorn>=0.30.1        # the server `scripts/run_api.py` starts
-pytest>=6.0            # tests only
+pytest>=6.0           # tests only
+psutil>=5.8.0          # bounds a CBC solve that overruns its own time limit

@@ -845,3 +845,43 @@ def test_a_unit_with_one_reactor_gains_no_visit_constraint(solved):
     assert cfg.min_reactor_visit_days("EXTRACT", "R1") == 1
     assert cfg.min_reactor_visit_days("HYDRO", "R2") == 1
     assert cfg.min_reactor_visit_days("HYDRO", "R1") > 1
+
+
+# ------------------------------------------------ bounding a runaway solve
+def test_the_watchdog_leaves_an_ordinary_solve_alone(solved):
+    """It must be invisible on every run that behaves.
+
+    The backstop exists for the tail - 900s budgets that have returned in
+    1,808s, 5,544s and once 29,550s - and the cost of getting it wrong is
+    killing a solve that was going to finish. So the normal path is asserted
+    explicitly rather than assumed: no timeout status, and no overrun note on a
+    run that came in on budget.
+    """
+    _, _, _, _, res = solved
+    assert res.status == "optimal", res.status
+    assert "was killed" not in (res.message or "")
+    assert "against a" not in (res.message or "")
+
+
+def test_the_watchdog_only_ever_kills_this_process_own_solver():
+    """Scoped to our own children, and inert without psutil.
+
+    Killing by image name would reach a solve running in another window or
+    another worker of the same app. A planner losing someone else's run to a
+    watchdog they never set is worse than the hang being bounded.
+    """
+    from invplanner.optimizer.v0 import _Watchdog
+
+    # fires against a process holding no CBC child: finds nothing, kills nothing
+    w = _Watchdog(0.01)
+    if w._thread is not None:
+        w._thread.join(timeout=5)
+    assert w.fired is False
+    w.cancel()
+
+    # and a cancelled watchdog never fires, however long its deadline was
+    w2 = _Watchdog(0.01)
+    w2.cancel()
+    if w2._thread is not None:
+        w2._thread.join(timeout=5)
+    assert w2.fired is False

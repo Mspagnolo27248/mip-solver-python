@@ -27,6 +27,8 @@ What it respects:
 from __future__ import annotations
 
 import datetime as dt
+import os
+import threading
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
@@ -66,6 +68,50 @@ def spec_line_charges(spec, line_key: str) -> Optional[str]:
         if line["key"] == line_key:
             return line["product"]
     return None
+
+
+class _Watchdog:
+    """Kill this process's own CBC children after `seconds`, if it comes to it.
+
+    Scoped to children of this process on purpose. Killing by image name would
+    reach a solve running in another window or another worker of the same app,
+    and a planner losing someone else's run to a watchdog they never set is a
+    worse failure than the hang this exists to bound.
+
+    Degrades to doing nothing if psutil is absent - the solve then behaves
+    exactly as it did before, which is the right failure for a safety net.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self.fired = False
+        self._done = threading.Event()
+        self._thread = None
+        try:
+            import psutil                                   # noqa: F401
+        except ImportError:
+            return
+        self._thread = threading.Thread(target=self._wait, args=(seconds,),
+                                        daemon=True)
+        self._thread.start()
+
+    def _wait(self, seconds: float) -> None:
+        if self._done.wait(seconds):
+            return                      # solved in time; nothing to do
+        import psutil
+        try:
+            me = psutil.Process(os.getpid())
+        except psutil.Error:
+            return
+        for child in me.children(recursive=True):
+            try:
+                if "cbc" in child.name().lower():
+                    self.fired = True
+                    child.kill()
+            except psutil.Error:
+                continue
+
+    def cancel(self) -> None:
+        self._done.set()
 
 
 class OptimizeResult:
@@ -1495,14 +1541,60 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     gap_abs = params.get("mip_gap_abs")
     if gap_abs is None:
         gap_abs = cfg.DEFAULT_GAP_ABS
+    asked = float(params.get("time_limit_seconds", 300) or 300)
     solver = pulp.PULP_CBC_CMD(msg=0,
-                               timeLimit=params.get("time_limit_seconds", 300),
+                               timeLimit=asked,
                                gapRel=params.get("mip_gap") or 0.0,
                                gapAbs=float(gap_abs),
                                warmStart=bool(free))
-    status = prob.solve(solver)
+
+    # CBC checks its own `sec` between nodes, so the limit is a request rather
+    # than a bound, and on this model it is occasionally missed by a lot: runs
+    # of 900 s have returned in 904 s (the norm), 1,808 s, 5,544 s and once
+    # 29,550 s - eight and a quarter hours against a fifteen minute budget.
+    # `cbc.wait()` inside PuLP has no timeout of its own, so nothing downstream
+    # can interrupt it.
+    #
+    # **A backstop, deliberately not a bound.** Killing CBC destroys the
+    # solution file it has not written yet, so stopping it at the asked-for
+    # limit would trade a late schedule for no schedule - much worse for a
+    # planner mid-run. The watchdog fires at a multiple instead: never in the
+    # normal case, and only where waiting longer has stopped being useful.
+    #
+    # 3x is a judgement, and it has a cost worth naming: run 29 took 5,544 s
+    # against a 900 s budget and came back with the best objective any run has
+    # scored on this model. This would have killed it. The argument for doing it
+    # anyway is that nobody asked for ninety minutes - a budget that the solver
+    # may exceed by thirty-three times is not a budget, and a planner who wants
+    # longer can say so. `solve_overrun_factor` is how they say it.
+    stop = _Watchdog(asked * float(params.get("solve_overrun_factor", 3.0))
+                     + 300.0)
+    try:
+        status = prob.solve(solver)
+    except Exception as e:
+        if not stop.fired:
+            raise
+        res.solve_seconds = time.time() - t0
+        res.solver = "CBC"
+        res.status = "timeout"
+        res.message = (
+            "solver stopped after {:,.0f}s against a {:,.0f}s budget and was "
+            "killed; no schedule was returned. CBC checks its limit between "
+            "nodes and can overrun by a wide margin on this model - raise "
+            "solve_overrun_factor to wait longer.".format(
+                time.time() - t0, asked))
+        return res
+    finally:
+        stop.cancel()
+
     res.solve_seconds = time.time() - t0
     res.solver = "CBC"
+    # Said plainly rather than left in the timings for someone to notice. A run
+    # that took six times its budget is not a slow run, it is a different thing
+    # from the one that was asked for.
+    if res.solve_seconds > asked * 1.25 + 60:
+        res.message = ("solver took {:,.0f}s against a {:,.0f}s budget. "
+                       .format(res.solve_seconds, asked) + (res.message or ""))
     res.objective = pulp.value(prob.objective)
 
     # Read `sol_status`, not `status`. PuLP's CBC reader rewrites the status when
