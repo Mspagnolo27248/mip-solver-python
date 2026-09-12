@@ -120,9 +120,19 @@ walkthrough.
    (which supplies two feeds). Each file is parsed before it replaces anything,
    so a sheet whose columns have moved is rejected rather than half-imported.
 
-2. **Create the scenario.** Same card -> *Create scenario from source data*. It
-   asks for a name and for the first day of the plan - the day the uploaded
-   inventory was taken - because that date is in none of the files.
+2. **Create the scenario.** Either the header's *New scenario* or the Source
+   data card's *Create scenario from source data* - they run the same code and
+   behave identically. Both ask for a name and for the first day of the plan, the
+   day the inventory you are planning from was taken, because that date is in
+   none of the files.
+
+   They did not always. The header button used to ask only for a name and let
+   the date fall back to the one the reference document names - the workbook's
+   own planning date. Two scenarios were made from September uploads and dated
+   2026-07-23 before anyone noticed: current tank levels, placed seven weeks in
+   the past, then seven weeks of demand and production that had already happened.
+   Nothing downstream detects it, and there is no endpoint to correct a
+   scenario's `as_of` afterwards - the only repair is to make it again.
 
    **Select the scenario you want the charge grid from before clicking.** The new
    scenario takes opening inventory and demand from the fresh uploads, but copies

@@ -1418,34 +1418,27 @@ $('#sync-all').addEventListener('click', async () => {
   toast(`Re-synced ${r.batches.length} feeds — overrides preserved`);
   loadFeeds();
 });
-$('#new-scenario').addEventListener('click', async () => {
-  const name = prompt('Name for the new scenario',
-    `Plan ${new Date().toISOString().slice(0, 10)}`);
-  if (!name) return;
-  const s = await api('/api/scenarios', {
-    method: 'POST',
-    body: JSON.stringify({
-      name,
-      copy_schedule_from: state.scenario ? state.scenario.id : null,
-    }),
-  });
-  toast(`Scenario "${s.name}" created from current source data`);
-  await boot();
-  $('#scenario-select').value = s.id;
-  await selectScenario(s.id);
-});
-
-/* The header's "New scenario" button starts on the day the reference document
- * names, which is the workbook's own planning date. Files uploaded today
- * describe today, so this one asks: a scenario that opens with fresh inventory
- * on a date five weeks in the past is wrong in a way nothing downstream can
- * detect. */
-$('#upload-scenario').addEventListener('click', async () => {
+/* Both buttons that make a scenario run this, and that is the point.
+ *
+ * They used to differ: the header's asked only for a name and let the API fall
+ * back to the date the reference document names - the workbook's own planning
+ * date - while the Source data one asked for the day the uploaded inventory was
+ * taken. The split was deliberate and it was wrong, because the failure it
+ * produces is silent. Two scenarios were created from September uploads and
+ * dated 2026-07-23: they opened with current tank levels, placed them seven
+ * weeks in the past, and then ran seven weeks of demand and production that had
+ * already happened. Nothing downstream can detect that, and there is no endpoint
+ * to correct a scenario's `as_of` afterwards - the only repair is to make it
+ * again.
+ *
+ * So there is one path now. Uploading is how data gets in, which makes "the day
+ * the inventory was taken" the question worth asking every time. */
+async function newScenario() {
   const today = new Date().toISOString().slice(0, 10);
   const name = prompt('Name for the new scenario', `Plan ${today}`);
   if (!name) return;
-  const asOf = prompt('First day of the plan — the day the uploaded inventory '
-    + 'was taken', today);
+  const asOf = prompt('First day of the plan — the day the inventory you are '
+    + 'planning from was taken', today);
   if (!asOf) return;
   const s = await api('/api/scenarios', {
     method: 'POST',
@@ -1459,7 +1452,10 @@ $('#upload-scenario').addEventListener('click', async () => {
   await boot();
   $('#scenario-select').value = s.id;
   await selectScenario(s.id);
-});
+}
+
+$('#new-scenario').addEventListener('click', newScenario);
+$('#upload-scenario').addEventListener('click', newScenario);
 
 function debounce(fn, ms) {
   let t;
