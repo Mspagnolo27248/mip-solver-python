@@ -62,12 +62,35 @@ lost sales and 5,595,214 gal of downgrade over 42 days - is cleared on both.
 
 At 100 days it misses verification by 272,306 gal of residual downgrade - close,
 but `fully_routed` is not a matter of degree and a run that fails it is not
-verified. Past that it degrades badly. **The cause is not established.** The
-obvious suspect is that the units this does *not* free run out of planner grid at
-different dates - ROSE stops 2026-11-15, extraction 2026-12-18 - but 110 days
-ends before any of those, so that is not the whole story and should be measured
-rather than assumed. Until it is, **treat 42 days as the supported horizon** and
-read the verification on anything longer.
+verified. Past that it degrades badly. **Treat 42 days as the supported horizon**
+and read the verification on anything longer.
+
+**The cause, traced.** Every gallon of that 272,306 sits on one product: **4313
+Kendex 0842**, ROSE's feed. It is one of the 27 tanked products with no downgrade
+outlet, and the only line that drains it is `ROSE#97` - on a unit this module does
+not free. So no rule written here can reach it directly. The chain behind it runs
+three units deep: MEK under-draws 4317, so 4317 fills, so the headroom cap
+throttles ROSE, so 4313 backs up with nowhere to go. And MEK cannot simply be
+told to run 4317, because 4317 sits at the far end of the viscosity ladder
+`9116 - 9117 - 9119 - 4317` and every changeover moves exactly one rung.
+
+**Three fixes were tried and all three are measured and rejected**, recorded so
+the next person does not spend the afternoon rediscovering them:
+
+    at 100 days                              residual        lost sales
+      as shipped                              272,306         2,543,811
+      + relieve a pressed feed, one arc       301,901         2,491,584  worse
+      + let fixed lines run to their ceiling  264,101         2,491,584  ~3%
+      + walk the ladder toward the pressure 3,956,965         5,914,763  much worse
+
+The ladder walk is the instructive failure: chasing relief several rungs away
+wrecks service, because every step toward 4317 is a step away from what the
+customers are actually short of. A 3% gain for two extra rules did not earn its
+complexity either, so the simplest version is what ships.
+
+**What would actually fix it** is freeing ROSE, which is a scope decision rather
+than a bug - v2 does not free it, so there is no formulation to check the rules
+against, and it needs its own measurement.
 
 Traps this module is written around, each verified in the code rather than
 assumed:
