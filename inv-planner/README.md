@@ -110,6 +110,32 @@ optimality gap, because there is no search. Judge it by the verification, not by
 an objective. Full reasoning and the bake-off table are in
 `src/invplanner/optimizer/greedy.py`.
 
+**The whole workflow, from today's input files to a finished plan.** Every step
+below was run end to end on 2026-09-12; scenario and run numbers are from that
+walkthrough.
+
+1. **Upload the three files.** Source data -> *Upload source files*. The filename
+   does not matter, only the slot: `inventory.xlsx` -> Tank inventory,
+   `open orders.xlsx` -> Open orders, `forecast.xlsx` -> Forecast & blend demand
+   (which supplies two feeds). Each file is parsed before it replaces anything,
+   so a sheet whose columns have moved is rejected rather than half-imported.
+
+2. **Create the scenario.** Same card -> *Create scenario from source data*. It
+   asks for a name and for the first day of the plan - the day the uploaded
+   inventory was taken - because that date is in none of the files.
+
+   **Select the scenario you want the charge grid from before clicking.** The new
+   scenario takes opening inventory and demand from the fresh uploads, but copies
+   its grid from whatever is currently open. That matters more for greedy than
+   for the MIP: greedy derives the horizon boundary from the grid and holds the
+   platformer and the transfer lines at its levels. A blank grid is a known-bad
+   input - `v0-42-blank` is recorded infeasible in `tests/baseline.json`.
+
+3. **Run greedy**, then **4. run v2 on greedy's result**, as below.
+
+On the walkthrough, greedy took scenario 64 from 8,863,918 gal of lost sales to
+947,712 in 2.5 seconds, verified.
+
 **From the app**
 
 1. **Optimizer inputs** -> *Model* -> **`greedy — rules, no solver (under a
@@ -167,6 +193,28 @@ gallons, and the improvement is against the plan the run started from:
       48  Cold start (fresh uploads)      yes           9,428,494     1,010,410
       49  Cold start (MEK/EXTRACT free)   yes           6,211,946     1,196,406
       46  Plan Spring TAR                 NO            9,336,869     2,465,202
+
+**Greedy first, then the MIP.** Greedy writes its answer as an ordinary scenario,
+so the MIP can plan from it. This is *not* a solver warm start - PuLP's
+`warmStart` is silently discarded on Windows and was measured as no benefit
+anyway (`optimizer/v0.py`). It changes the MIP's inputs: the charge floor applies
+to greedy's levels rather than the planner's, and `RATE_BASIS_IS_FLOOR` lifts a
+line's ceiling to whatever greedy ran it at.
+
+Measured on scenario 48 at 42 days, `time_limit_seconds` 900:
+
+    v2 straight from the plan      904 s     329,833 gal lost   verified
+    greedy                           3 s   1,010,410 gal lost   verified
+    greedy, then v2 on its result  904 s     271,952 gal lost   verified
+
+**17.5% better lost sales for the same wall clock**, and the greedy pass is
+effectively free at three seconds. Both v2 runs hit the time limit and neither
+proved optimality, so these are two incumbents at the same budget - a fair
+comparison, unlike an incumbent against a proved optimum. One scenario at one
+horizon, so treat it as promising rather than settled.
+
+To do it: run greedy, note `result_scenario_id`, switch Model back to `v2`, and
+run again against **that** scenario rather than the original plan.
 
 **Known limits. Read these before trusting a run.**
 
