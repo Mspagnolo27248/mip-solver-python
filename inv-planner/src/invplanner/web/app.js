@@ -1117,6 +1117,7 @@ async function loadOptParams() {
       v0: 'v0 — keep my assignments',
       v1: 'v1 — decide MEK & extraction',
       v2: 'v2 — also decide the hydrotreater (~5 min)',
+      greedy: 'greedy — rules, no solver (under a second)',
     },
     objective: {
       cost: 'cost — minimise what the plan gives up',

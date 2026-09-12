@@ -41,7 +41,7 @@ from typing import Any, Dict, List
 from . import model_config as cfg
 from .engine import Reference, Scenario, simulate
 from .modelprep import build
-from .optimizer import v0, v1, v2
+from .optimizer import greedy, v0, v1, v2
 
 #: Shared by every case, so a row's own entry says only what makes it different.
 COMMON: Dict[str, Any] = {
@@ -240,7 +240,7 @@ def run_case(case: Dict[str, Any], ref, scn, sim, down) -> Dict[str, Any]:
     spec = build(ref, scn, sim, horizon=dates, downtime=down)
     params = dict(COMMON, horizon_days=case["days"],
                   mip_gap=0.0 if case["exact"] else 0.02, **case["params"])
-    model = {"v0": v0, "v1": v1, "v2": v2}[case["model"]]
+    model = {"v0": v0, "v1": v1, "v2": v2, "greedy": greedy}[case["model"]]
     res = model.solve(ref, scn, spec, params, horizon=dates, downtime=down)
 
     row: Dict[str, Any] = {"status": res.status, "exact": case["exact"]}

@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional
 
 from .. import economics, model_config as cfg
 from ..engine import GAL_PER_BBL, Reference, Scenario, month_key
+from . import balance
 
 try:
     import pulp
@@ -527,57 +528,12 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
             sell_cost[p] = discount
 
     # ------------------------------------------------------------- balance
-    produces = defaultdict(list)     # product -> [(line_key, gal per bbl charged)]
-    alias = getattr(spec, "production_alias", {}) or {}
-    for rule in spec.yield_rules:
-        if rule["kind"] == "unit":
-            # Some production is booked under one code and lands in another
-            # product's tank - isomerate run into isomerate. Credit it where the
-            # workbook puts it, or the receiving product looks unproduceable.
-            produces[alias.get(rule["out"], rule["out"])].append(
-                (rule["charge_line"], rule["yield"] * GAL_PER_BBL))
-
-    # The hydrotreater returns what it did not convert to the diesel charge pool:
-    # charge x (1/yield - 1) on every R2 line. It is a `diesel_yield_back` rule
-    # rather than a `unit` one, so the loop above walked straight past it and the
-    # optimizer never saw the material at all - 1,857,314 gal over 160 days into
-    # a 1,200,000 gal tank. Under 42 days the tank absorbed it and nothing looked
-    # wrong; past that the replay overflowed by exactly the amount the optimizer
-    # had not been told about.
-    #
-    # The coefficient is `1 - yield`, not `1/yield - 1`. The engine applies its
-    # factor to the row's *output* (charge x yield), so the two compose to
-    # charge x (1 - yield); applying `1/yield - 1` to the charge itself
-    # overstates the return by about 18% at a 0.85 yield, which is enough to
-    # make the optimizer charge diesel the tank cannot supply.
-    #
-    # The terms name production-out rows, so they are matched back to their
-    # charge lines through `po_row` on the reference's own yield rules.
-    line_of_po_row = {r["po_row"]: r["charge_line"] for r in ref.yield_rules
-                      if r.get("kind") == "unit" and r.get("po_row") is not None
-                      and r.get("charge_line")}
-    for rule in spec.yield_rules:
-        if rule["kind"] != "diesel_yield_back":
-            continue
-        target = alias.get(rule["out"], rule["out"])
-        for term in rule["terms"]:
-            y = term.get("yield") or 0.0
-            key = line_of_po_row.get(term.get("source_po_row"))
-            if key and y > 0:
-                produces[target].append((key, (1.0 - y) * GAL_PER_BBL))
-    consumes = defaultdict(list)     # product -> [line_key]
-    for line in lines:
-        consumes[line["product"]].append(line["key"])
-
-    # Where a transfer lands. Downgraded material does not disappear: it becomes
-    # diesel charge, #6 oil or cat feed, and the receiving pool has to carry it
-    # or the balance quietly creates and destroys oil.
-    lands_in = {}                    # line_key -> product that receives it
-    for rule in spec.yield_rules:
-        if rule["kind"] != "transfer":
-            continue
-        for key in rule.get("charge_lines", []):
-            lands_in[key] = rule["out"]
+    # Shared with the rule-based scheduler, which needs the same chain to walk a
+    # tank ledger forward. See `optimizer/balance.py` for why these are not
+    # written out twice - every defect this model has had lived in here.
+    produces = balance.produces_map(ref, spec)
+    consumes = balance.consumes_map(lines)
+    lands_in = balance.lands_in_map(spec)
 
     # Crude supply. The spec keeps the mode-gated streams apart so a later
     # version can choose between them, but v0 takes the assignments as given -

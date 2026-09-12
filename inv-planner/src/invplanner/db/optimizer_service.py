@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..engine import simulate
 from ..modelprep import build
-from ..optimizer import v0, v1, v2, verify
+from ..optimizer import greedy, v0, v1, v2, verify
 from . import service as svc
 from .models import (AuditEvent, OptimizerParams, OptimizerRun, Scenario,
                      ScheduleEntry, as_utc)
@@ -127,13 +127,16 @@ LABELS = {
         "level, the model cannot tell shorting a customer from drawing a tank "
         "down; set close, it shorts customers to hold stock."),
     "model_version": (
-        "Model", "v0, v1 or v2",
+        "Model", "v0, v1, v2 or greedy",
         "v0 keeps your charge assignments and optimises only how much and where "
         "the overflow goes. v1 also decides what MEK and extraction charge each "
         "day. v2 adds the hydrotreater, solved in two stages because freeing all "
         "three at once does not finish - each stage is proved optimal, the pair "
         "is not a joint optimum. Over 100 days: v0 seconds, v1 a couple of "
-        "minutes, v2 about five."),
+        "minutes, v2 about five. greedy is not a solver at all - it builds a "
+        "schedule by rule in under a second and cannot tell you how far from "
+        "best it is, so read its verification and campaign shape rather than "
+        "an objective."),
     "horizon_days": ("Detailed horizon", "days",
                      "Firm orders cover about 57 days; beyond that demand is "
                      "pure forecast."),
@@ -253,7 +256,11 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner"
 
         # v2 is a two-stage solve, not a bigger one - see optimizer/v2.py for
         # why freeing all three units at once does not finish.
-        model = {"v0": v0, "v1": v1, "v2": v2}.get(p.model_version or "v1", v1)
+        # `.get`'s default silently runs v1 for an unrecognised name while the
+        # run records itself under the name asked for, so anything selectable in
+        # the UI has to be here too.
+        model = {"v0": v0, "v1": v1, "v2": v2,
+                 "greedy": greedy}.get(p.model_version or "v1", v1)
         result = model.solve(ref, escn, spec, solver_params, horizon=dates,
                              downtime=downtime)
         run_row.params = dict(payload, model_version=p.model_version)
