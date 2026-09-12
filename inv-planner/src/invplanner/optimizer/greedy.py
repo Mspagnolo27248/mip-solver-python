@@ -1,4 +1,4 @@
-"""greedy: the three units schedule themselves by rule, in one forward pass.
+"""greedy: the four decision units schedule themselves by rule, in one pass.
 
 Not a MIP. No branch and bound, no CBC, no gap. It walks the horizon a day at a
 time carrying a tank ledger, and on each day it decides what each freed unit
@@ -24,18 +24,13 @@ and margin breaks ties. That is how a planner works, and it is defensible line b
 line in a way "the feasibility pump landed here" is not.
 
 **Order matters, and the chain is not the obvious one.** Units are decided
-upstream first, MEK then EXTRACT then HYDRO, so a downstream unit sees the feed
-the upstream one has just committed to making; the balance permits same-day
-consumption of same-day production, which is what makes one pass enough. Two
-corrections to the tidy picture, both of which would bite a scheduler that
+upstream first - ROSE, then MEK, then EXTRACT, then HYDRO - so a downstream unit
+sees the feed the upstream one has just committed to making; the balance permits
+same-day consumption of same-day production, which is what makes one pass enough.
+Two corrections to the tidy picture, both of which would bite a scheduler that
 assumed a clean chain: extraction is not MEK's only outlet (`MEK#72` makes 9720,
 which feeds `HYDRO#83` directly), and extraction is not HYDRO's only feed (it
 also takes 9720 from MEK, 9711/9712/9703 straight from crude, and the 9713 pool).
-
-**ROSE is not freed** even though it is a decision unit. v2 does not free it, so
-there is no formulation to check a rule against, and its campaigns run about 40
-days - "start one and hold it" is most of what a rule would say. Its charges are
-taken as the planner left them, which also makes its output fixed supply to MEK.
 
 **Measured, against the seed plan, cost objective.** All figures are the
 simulator's after replay, not this module's own arithmetic:
@@ -44,7 +39,7 @@ simulator's after replay, not this module's own arithmetic:
       v0            ~3 s     yes           774,339      2,794,262       590,004
       v1            ~9 s     yes           774,339      2,655,686       595,950
       v2           ~60 s     yes           795,603      2,520,402       591,729
-      greedy      0.013 s    yes           830,390      1,834,412       599,171
+      greedy      0.021 s    yes           830,390      1,834,412       599,500
 
 So at 42 days it is **4.4% behind v2 on service, 27% ahead on downgrade, and
 about 4,600x faster**. Campaign shape is the part that surprised: 12 EXTRACT
@@ -55,42 +50,44 @@ is the direction a planner wants.
 The standing acceptance bar from `MIP-FORMULATION.md` - beat 6,673,800 gal of
 lost sales and 5,595,214 gal of downgrade over 42 days - is cleared on both.
 
+ROSE confirms the scoring rather than straining it: freed, with nothing said about
+it beyond cover and margin, it comes back with **one campaign of 42 days and zero
+changeovers** - which is what the plant does, and what a special case would have
+had to be written to produce.
+
 **Where it stops working, stated rather than buried:**
 
-    100 days     0.036 s    NO     2,543,811 lost, 272,306 gal left unrouted
-    160 days     0.031 s    NO    16,837,555 lost, 10.5 M gal left unrouted
+    100 days     0.019 s    NO     2,543,811 lost,  23,452 gal left unrouted
+    160 days     0.043 s    NO    16,837,555 lost, 10.9 M gal left unrouted
 
-At 100 days it misses verification by 272,306 gal of residual downgrade - close,
-but `fully_routed` is not a matter of degree and a run that fails it is not
-verified. Past that it degrades badly. **Treat 42 days as the supported horizon**
-and read the verification on anything longer.
+`fully_routed` is not a matter of degree, so both of those are unverified runs.
+**Treat 42 days as the supported horizon** and read the verification on anything
+longer.
 
-**The cause, traced.** Every gallon of that 272,306 sits on one product: **4313
-Kendex 0842**, ROSE's feed. It is one of the 27 tanked products with no downgrade
-outlet, and the only line that drains it is `ROSE#97` - on a unit this module does
-not free. So no rule written here can reach it directly. The chain behind it runs
-three units deep: MEK under-draws 4317, so 4317 fills, so the headroom cap
-throttles ROSE, so 4313 backs up with nowhere to go. And MEK cannot simply be
-told to run 4317, because 4317 sits at the far end of the viscosity ladder
-`9116 - 9117 - 9119 - 4317` and every changeover moves exactly one rung.
+**How the 100-day case got from 272,306 gal to 23,452.** The residual sat entirely
+on **4313 Kendex 0842**, ROSE's feed - one of the 27 tanked products with no
+downgrade outlet, drained only by `ROSE#97`. With ROSE held at the planner's
+levels nothing could reach it: the chain ran three units deep - MEK under-draws
+4317, 4317 fills, the headroom cap throttles ROSE, 4313 backs up - and MEK cannot
+be pointed at 4317 directly, because it sits at the far end of the viscosity
+ladder and every changeover moves one rung. **Freeing ROSE removed 91% of it.**
+What is left is 23,452 gal on a single day, 2026-10-23, which is a timing edge
+rather than a structural gap.
 
-**Three fixes were tried and all three are measured and rejected**, recorded so
-the next person does not spend the afternoon rediscovering them:
+**Three other fixes were tried, measured, and rejected**, recorded so the next
+person does not spend an afternoon rediscovering them:
 
-    at 100 days                              residual        lost sales
-      as shipped                              272,306         2,543,811
-      + relieve a pressed feed, one arc       301,901         2,491,584  worse
-      + let fixed lines run to their ceiling  264,101         2,491,584  ~3%
-      + walk the ladder toward the pressure 3,956,965         5,914,763  much worse
+    at 100 days, before ROSE was freed        residual        lost sales
+      three units                              272,306         2,543,811
+      + relieve a pressed feed, one arc        301,901         2,491,584  worse
+      + let fixed lines run to their ceiling   264,101         2,491,584  ~3%
+      + walk the ladder toward the pressure  3,956,965         5,914,763  15x worse
 
 The ladder walk is the instructive failure: chasing relief several rungs away
-wrecks service, because every step toward 4317 is a step away from what the
-customers are actually short of. A 3% gain for two extra rules did not earn its
-complexity either, so the simplest version is what ships.
-
-**What would actually fix it** is freeing ROSE, which is a scope decision rather
-than a bug - v2 does not free it, so there is no formulation to check the rules
-against, and it needs its own measurement.
+wrecks service, because every step toward 4317 is a step away from what customers
+are actually short of. A 3% gain did not earn two extra rules either. Freeing the
+unit that owned the tank was worth more than all three, and it needed no new rule
+at all.
 
 Traps this module is written around, each verified in the code rather than
 assumed:
@@ -121,9 +118,23 @@ from .. import economics, model_config as cfg
 from ..engine import GAL_PER_BBL, Reference, Scenario
 from . import balance, v0
 
-#: The units this decides. The same three v2 frees, for the same reason: they are
-#: the ones whose transition structure is known well enough to write rules for.
-FREE_UNITS: List[str] = ["MEK", "EXTRACT", "HYDRO"]
+#: The units this decides.
+#:
+#: Three of them are the ones v2 frees, for the same reason: their transition
+#: structure is known well enough to write rules against.
+#:
+#: **ROSE is the fourth, and it is here because leaving it out did not work.**
+#: v2 does not free it, so there was no formulation to check against and it was
+#: held at the planner's levels to start with. That put 4313 Kendex 0842 - ROSE's
+#: feed, one of the 27 tanked products with no downgrade outlet - over its tank by
+#: 272,306 gal at 100 days, with `ROSE#97` the only line that could have drained
+#: it and no rule on the other three able to reach it. Freeing ROSE cut that by
+#: 91%, to 23,452 gal on a single day.
+#:
+#: A rule is cheap here: two lines, no reactor, no restricted arcs, and campaigns
+#: the plant runs about 40 days at a time, so "start one and hold it" is most of
+#: what there is to say. The cover rule reproduces that on its own.
+FREE_UNITS: List[str] = ["ROSE", "MEK", "EXTRACT", "HYDRO"]
 
 #: Days of cover a candidate must beat the incumbent by before the unit switches.
 #: Without hysteresis a pure cover rule chases whatever is lowest and changes over
