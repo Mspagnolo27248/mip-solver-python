@@ -476,10 +476,51 @@ class OptimizerParams(Base):
     #: schedule handed back anyway (fixed in `optimizer/v0.py`).
     charge_floor_fraction = Column(Float, default=0.30, nullable=False)
 
+    #: Whether a freed unit must be running on every day it is not in a
+    #: turnaround.
+    #:
+    #: True is the plant: inside the region the plan schedules, MEK runs 160 of
+    #: 162 days and extraction 151 of 162, so idling is the exception. It is also
+    #: what stops the optimizer relieving any inventory problem by simply not
+    #: running.
+    #:
+    #: False is what a **cold start** needs. Handed a scenario with MEK and
+    #: extraction empty, the model has to let extraction stand while MEK builds
+    #: its feeds - 9302, 9303 and 9305 all come off MEK, one line at a time - and
+    #: with must-run on, the 100-day solve is infeasible where the same scenario
+    #: with it off is feasible. Turn it off to plan a fresh window; turn it back
+    #: on before trusting the campaign shape, because a schedule that may idle
+    #: freely is not one the plant would run.
+    must_run = Column(Boolean, default=True, nullable=False)
+
+    #: The least a freed unit may charge when it is running, as a fraction of the
+    #: line's maximum rate.
+    #:
+    #: Not the same thing as `charge_floor_fraction`, and the two never meet: the
+    #: charge floor is a fraction of what the *planner* scheduled and applies to
+    #: fixed lines, while this is a fraction of the line's own *rate* and applies
+    #: only to the units the model decides for (`v0.py`, "the floor does not
+    #: apply").
+    #:
+    #: 0.60 sits just under the lowest rate the plant has been observed to hold
+    #: mid-campaign (0.64; median 0.77). It exists because must-run binds the
+    #: day's *time* and nothing bound volume, so the model allocated days it then
+    #: charged nothing through.
+    #:
+    #: It is also what makes a **cold start** infeasible. Extraction's stocked
+    #: feeds cover about three days at 60% of rate, and its remaining lines run on
+    #: 9305, which MEK cannot build ahead while also replacing what extraction is
+    #: burning. At 0.30 the same 30-day solve is feasible. Below the plant's
+    #: observed floor is a real concession - a schedule that trickles is not one
+    #: the plant would run - so lower it for the ramp and read the campaign shape
+    #: knowing it was bought.
+    min_rate_fraction = Column(Float, default=0.60, nullable=False)
+
     #: Which model runs. "v0" fixes the planner's assignments and optimises
     #: levels and routing only; "v1" also decides what MEK and extraction charge,
     #: on the allowed transitions. v0 solves in about a second and v1 in about
-    #: ten - see V1-MODEL.md for why proving optimality is not worth its cost.
+    #: ten - see SCHEDULING-MODEL.md for why proving optimality is not
+    #: worth its cost.
     #: "v0", "v1" or "v2". v2 frees the hydrotreater as well, in two stages -
     #: freeing all three units at once cannot prove optimality past seven days.
     model_version = Column(String(8), default="v1", nullable=False)

@@ -169,7 +169,7 @@ def test_the_freed_units_keep_running(solved):
     rates are zero, so a freed unit can allocate its day and still charge very
     little. That gap closes when minimum rates are filled in, or when the
     objective rewards production instead of only penalising its absence - see
-    MIN_RATE_FRACTION and MARGIN-OBJECTIVE.md. Until then this is a floor on the
+    MIN_RATE_FRACTION and docs/archive/MARGIN-OBJECTIVE.md. Until then this is a floor on the
     behaviour, not a guarantee of it.
     """
     _, _, _, _, res = solved

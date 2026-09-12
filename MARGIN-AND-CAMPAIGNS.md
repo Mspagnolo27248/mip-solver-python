@@ -1,6 +1,6 @@
 # Making the model want to run, and want to stay put
 
-Companion to `MARGIN-OBJECTIVE.md`, which argues *why* the objective should be
+Companion to `docs/archive/MARGIN-OBJECTIVE.md` (archived), which argues *why* the objective should be
 profit. This one is the execution order, and it covers a second change that has to
 land at the same time: the brake on changeovers.
 
@@ -99,7 +99,7 @@ price at all (section 5c), and the reprice-the-baseline check below.
 
 ## 4. Step 2 — the guardrail does not work, and here is why
 
-`MARGIN-OBJECTIVE.md:129-131` proposes: set every product and sink netback to the
+`docs/archive/MARGIN-OBJECTIVE.md`, guardrail 1, proposes: set every product and sink netback to the
 same value, and the schedule should not move. It was implemented
 (`flat_netback_per_gal`) and it **does not hold — and should not be expected to.**
 The test is invalid, not the objective.
@@ -127,7 +127,7 @@ where `value_of`, `sink_value` and `netbacks` are built, so nothing downstream c
 disagree. A price override that reaches some prices and not others is not a
 guardrail, it is a fourth objective nobody designed.
 
-**What to use instead.** The second guardrail from `MARGIN-OBJECTIVE.md:132-135`
+**What to use instead.** The second guardrail from `docs/archive/MARGIN-OBJECTIVE.md`
 survives and is the one to lean on: score the planner's own schedule under the new
 objective and show finance revenue, crude bill and margin. An implausible absolute
 margin means the netbacks are wrong, and that is far easier to see in dollars than
@@ -162,7 +162,7 @@ something. Pinned by `test_margin_mode_solves_and_wants_to_run`.
 
 **And it is shaped by a number nobody had measured.** See section 5c.
 
-Three mechanics, per `MARGIN-OBJECTIVE.md:46-51`.
+Three mechanics, per `docs/archive/MARGIN-OBJECTIVE.md` section 2.
 
 **Maximise revenue; report profit.** Crude rate is a fixed input
 (`CRUDE_RATE_IS_INPUT`, `model_config.py:623-635`), so the crude bill is a constant, and a constant cannot
@@ -217,7 +217,7 @@ That means **downgrades carry no term in the margin objective at all.** Pricing
 them would pay for the same gallon twice, which is exactly the double-count
 `dg_cost`'s docstring confesses to. The cost of downgrading is not priced, it
 *emerges*: the landing product's netback is lower, so the gallon simply earns less.
-This is what `MARGIN-OBJECTIVE.md` means by "every gallon earns exactly once,
+This is what `docs/archive/MARGIN-OBJECTIVE.md` means by "every gallon earns exactly once,
 wherever it ends up, and this function disappears" — and it is a stronger result
 than expected, because it needs no new price to be collected for any sink.
 
@@ -291,12 +291,26 @@ things end at three different points.
 | **2026-12-31** | **last day the planner filled in a charge — the boundary** |
 | 2027-07-17 | extent of the Charge Schedule date columns |
 
-Enforced now in code rather than remembered: `DATA_VALID_THROUGH` in
-`model_config`, applied in `v0.solve` where every caller passes through. A horizon
-that runs past it is cut back and the result says so
-(`kpis["horizon_truncated_days"]`); one entirely past it is refused outright.
-Silent truncation is normally the wrong instinct, but the alternative here is a
-confident schedule built on demand nobody stands behind.
+Enforced now in code rather than remembered: `cfg.clamp_horizon`, applied in
+`v0.solve` where every caller passes through. A horizon that runs past it is cut
+back and the result says so (`kpis["horizon_truncated_days"]`); one entirely past
+it is refused outright. Silent truncation is normally the wrong instinct, but the
+alternative here is a confident schedule built on demand nobody stands behind.
+
+**The date is derived, not written down.** `cfg.schedule_valid_through(scn)`
+reads the last day the planner filled in a charge on a decision unit — on this
+workbook, the 2026-12-31 in the table above. Written into the config it would
+have had to be hand-edited on every input refresh, and a planner who extended
+their plan by a month would have got the same silent truncation with no way to
+see why. Extend the grid and the horizon extends with it.
+
+Note which half binds. Demand does not run out: the sales forecast, blend demand
+and base-oil transfers are all *monthly* rates, so they answer for any day asked.
+It is the schedule that stops, and crude — a fixed input — does not, so past the
+grid the side streams keep landing with nothing charging them and the feed tanks
+burst. `cfg.DATA_VALID_THROUGH` is left as an explicit override for the case
+where the data is believed to be wrong earlier than the grid ends; `None`, the
+normal setting, means derive.
 
 **The practical limit is two days shorter: 160 days, ending 2026-12-29.** The 161st
 is infeasible for a far smaller reason than the full-year case — the elastic
@@ -809,7 +823,8 @@ to charge and interface genuinely slopped off (`model_config.py:731-737`).
 
 **Drop `charge_floor_fraction` from 1.0 and the schedule should not move.**
 
-This is the test that the whole change worked, and `MARGIN-OBJECTIVE.md:83-87`
+This is the test that the whole change worked, and `docs/archive/MARGIN-OBJECTIVE.md`
+section 3
 names it as such. The floor exists because production earned nothing. Once it
 earns, the model should want to run on its own — and if it does not, the netbacks
 are wrong or the objective is not describing the plant.
@@ -852,7 +867,7 @@ a profit.
 
 ## 9. What can still go wrong
 
-**Sinks priced too high.** `MARGIN-OBJECTIVE.md:143-146`: sink netbacks must sit
+**Sinks priced too high.** `docs/archive/MARGIN-OBJECTIVE.md` section 6: sink netbacks must sit
 strictly below product netbacks, or the model downgrades profitable material on
 purpose. Under maximise that is revenue, not a forgotten penalty, and it will read
 as a bug when it is not one. Assert it as an input check rather than discovering it

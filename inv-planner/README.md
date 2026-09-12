@@ -4,8 +4,9 @@ The refinery planning workbook rebuilt as an application: the workbook's logic a
 a validated engine (Phase 0), and a web app with a source → staging → scenario
 data layer on top of it (Phase 1).
 
-See `../BUSINESS-LOGIC.md` for the domain decomposition and `../WEBAPP-MIP-PLAN.md`
-for how this fits the wider build, including the MIP scheduler.
+See `../BUSINESS-LOGIC.md` for the domain decomposition, `../MIP-FORMULATION.md`
+for the optimization model and `../docs/archive/WEBAPP-MIP-PLAN.md` for the
+original build plan this grew out of.
 
 ---
 
@@ -35,8 +36,8 @@ planner entered it. You should see:
 
 ```
 reference version 1 (54 blocks, 1445 products)
-  synced inventory                   403 rows
-  synced open_orders                 333 rows
+  synced inventory                   403 rows  from workbook-seed:scenario.json
+  synced open_orders                 333 rows  from workbook-seed:scenario.json
   ...
 scenario 1: Baseline (from workbook) (as of 2026-07-23)
 ```
@@ -74,9 +75,26 @@ Useful flags:
 4. **Inventory projection** — one product in depth, with the capacity and control
    band drawn on a chart.
 5. **Charge schedule** — change a barrels-per-day cell or flip the crude R/L mode;
-   the projection re-simulates as soon as you tab out of the cell.
+   the projection re-simulates as soon as you tab out of the cell. **Set a rate
+   across the window** writes one rate onto every day in a range, which is how a
+   plan is laid down rather than corrected: put the crude, ROSE and Platformer
+   rates across the whole horizon, then clear MEK and extraction and let the
+   optimizer schedule them. It skips days a unit is down, and setting a rate on
+   one line clears the other lines on that unit, because a unit runs one feed at
+   a time. "Only days the unit is idle" fills the blank tail of a schedule
+   without touching the stretch it already covers, which is what a rolling plan
+   needs.
+
+   **Leave the hydrotreater's rows alone.** Clearing them does not free it — v2
+   frees it in stage two whatever the grid says, and it keeps 1 cell in 107 of
+   what was there. What the rows do is tell *stage one* that something
+   downstream consumes 9704, 9705, 9711, 9712, 9703 and 9720, and with them
+   deleted stage one sizes MEK and extraction for a plant with no hydrotreater.
+   See `optimizer/v2.py`.
 6. **Source data** — the six feeds. Type in an Override column to correct a value;
-   press "Sync this feed" and watch the override survive.
+   press "Sync this feed" and watch the override survive. Upload today's
+   inventory, open orders or forecast here too, then "Create scenario from
+   source data" to plan on them.
 
 The product families are defined in `src/invplanner/groups.py` as plain lists of
 product codes — edit them there if a product belongs somewhere else. Anything not
@@ -95,6 +113,43 @@ python scripts/init_db.py      # load it as a new reference version
 ```bash
 python scripts/init_db.py --reset
 ```
+
+### Updating the numbers without re-importing the workbook
+
+Three of the feeds can be uploaded on their own, as the small exports a planner
+produces on demand rather than a slice of the 6 MB workbook:
+
+| File | Shape expected in row 1 | Feeds it replaces |
+|---|---|---|
+| `inventory.xlsx` | `Code \| Product \| Net Inv` | inventory |
+| `open orders.xlsx` | `Code \| Product \| one column per ship date` | open_orders |
+| `forecast.xlsx` | `CODE \| Oct…Sep`, twice across | sales_forecast, blend_component_demand |
+
+In the app: **Source data → Upload source files**, one file per card. From a
+folder of all three at once:
+
+```bash
+python scripts/load_inputs.py ../transfer-inputs --dry-run
+python scripts/load_inputs.py ../transfer-inputs --scenario "Plan 2026-08-28"
+```
+
+Files are matched to feeds by name, parsed before they replace anything, and
+stored in `data/uploads/`. Anything not uploaded keeps reading the workbook
+seed, so this is per feed rather than all-or-nothing; deleting a file from
+`data/uploads/` (or "use workbook" on its card) puts that feed back.
+
+Two things worth knowing. Sign and units follow the workbook: open orders arrive
+as negative gallons and are stored as positive demand, the forecast grids are
+daily rates in gal/day keyed by month. And uploading changes **source data
+only** — an existing scenario keeps the numbers it was frozen with, so make a new
+scenario to plan on what you just loaded. Give it the day the inventory was
+taken: the "Create scenario from source data" button asks, because a plan that
+opens with today's tanks on a date five weeks in the past is wrong in a way
+nothing downstream can detect.
+
+Two feeds still come only from the workbook — base-oil transfers and blend
+recipes — as does everything in Model inputs (yields, run rates, capacities,
+control limits).
 
 ### Checking it works
 
@@ -181,13 +236,16 @@ src/invplanner/
   layout.py     row/column anchors of the workbook, validated on every import
   xlsx.py       cell access, date/code coercion
   importer.py   workbook -> reference.json + scenario.json
+  feedsheets.py standalone feed exports -> the same values, validated by header
   engine.py     production calculation + daily inventory balance
   parity.py     engine vs. workbook cached values, with a defect allowlist
 scripts/
   seed.py       build the JSON seed from the workbook
+  load_inputs.py upload a folder of feed exports, optionally into a scenario
   run_parity.py run the comparison, write the report
 data/
   seed/         reference.json, scenario.json, import-warnings.txt
+  uploads/      feed exports uploaded since, one per sheet kind
   reports/      parity-report.md, parity-diffs.json
   known-defects.json
 tests/
@@ -293,11 +351,21 @@ changed, instead of silently shadowing new data.
 Scenarios freeze staging at a moment in time, which is what makes plan-vs-plan
 comparison meaningful and gives the optimizer stable inputs.
 
-**Connectors.** `db/connectors.py` defines a connector per feed. Today they read
-the workbook-derived JSON seed, which is what lets the app run on real data now.
-Pointing a feed at its live source — the SQL database behind the SharePoint
-inventory workbook, the ERP order extract — means adding a class there; staging,
-scenarios, and the engine are untouched.
+**Connectors.** `db/connectors.py` defines a connector per feed, and the choice
+of connector is per feed rather than global. `WorkbookSeedConnector` reads the
+workbook-derived JSON seed; `UploadedSheetConnector` reads a standalone export a
+planner dropped in, parsed by `feedsheets.py`. `default_connectors` prefers an
+upload where one exists and falls back to the seed where it does not, which is
+why inventory can come from this morning's export while base-oil transfers still
+come from the workbook.
+
+That is the same seam the live sources will use. Pointing a feed at the SQL
+database behind the SharePoint inventory workbook, or at the ERP order extract,
+means adding a third class there; staging, scenarios, and the engine are
+untouched either way. The uploaded sheets stage the same keys as the seed
+(inventory under `ALL` rather than a tank id, orders as positive demand), so an
+override made against workbook data survives the switch and is flagged stale if
+the new source disagrees with it.
 
 **Database.** SQLAlchemy models run on SQLite by default (zero setup) and on
 Postgres by setting `DATABASE_URL`.
@@ -313,7 +381,7 @@ Four views, mapping onto the workbook they replace:
 | **Stream sheet** | Solvents, LLN, Cstock, MN, HN, Napthas, CRUDE | The workbook layout itself: pick a stream and read every product in it, each with its full balance block — beginning inventory, production in, sales, forecast, blends, charged out, ending inventory, capacity, headroom — with dates across. Days that go negative or over capacity are highlighted on the ending-inventory row. |
 | **Inventory projection** | INV TARGETS, chart tabs | One product in depth: daily balance with a chart of ending inventory against tank capacity and the LCL/UCL band. |
 | **Charge schedule** | Charge Schedule | Editable bbl/day grid per unit, plus the crude R/L mode toggle. An edit re-simulates immediately. Also holds **planned downtime** — the days a unit cannot produce, set before an optimizer run. |
-| **Source data** | the feed paste areas | Staging editor: source value, override, effective value, who changed it and why, with stale-override flags and per-feed re-sync. |
+| **Source data** | the feed paste areas | Staging editor: source value, override, effective value, who changed it and why, with stale-override flags and per-feed re-sync. Also where inventory, open orders and the forecast grid are uploaded as standalone files. |
 
 The front end is dependency-free and served by FastAPI — no build step, nothing to
 install, no CDN. It is deliberately replaceable: when grid ergonomics start to
@@ -329,6 +397,9 @@ GET   /api/feeds/{feed}/rows              staging rows (search, filter, paging)
 POST  /api/feeds/{feed}/sync              re-pull one feed
 POST  /api/feeds/sync-all
 GET   /api/feeds/{feed}/batches           sync history
+GET   /api/feeds/uploads                  which feeds read from an uploaded file
+POST  /api/feeds/upload/{kind}            the workbook as the raw body; parse, store, sync
+DEL   /api/feeds/upload/{kind}            drop it, back to the workbook seed
 PATCH /api/staging/{cell_id}              set or clear an override
 GET   /api/scenarios                      list
 POST  /api/scenarios                      freeze staging into a new scenario
@@ -341,6 +412,7 @@ GET   /api/scenarios/{id}/projection      daily balance for one product
 GET   /api/scenarios/{id}/alerts          capacity / stockout / band breaches
 GET   /api/scenarios/{id}/schedule        charge grid for a date window
 PATCH /api/scenarios/{id}/schedule        edit a unit-day charge
+POST  /api/scenarios/{id}/schedule/fill   one rate across a date range, or clear a unit
 PATCH /api/scenarios/{id}/crude           edit crude rate or R/L mode
 GET   /api/scenarios/{id}/downtime        planned downtime, windows and days
 POST  /api/scenarios/{id}/downtime        add a downtime window

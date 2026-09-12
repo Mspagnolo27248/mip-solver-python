@@ -1,3 +1,11 @@
+> **Archived 2026-09-12 — superseded.** This was the pre-build plan, written
+> before any code existed and reasoning from the domain rather than from
+> measurements. Workstream A and B shipped; see `inv-planner/README.md` for what
+> was actually built (SQLite and vanilla JS, not the Postgres/React of B4).
+> Workstream C is superseded in full by `MIP-FORMULATION.md`, which measures what
+> this chapter guessed. Kept for the diagnosis in C1 and the phasing rationale,
+> which are still sound; do not plan from the rest.
+
 # Plan: Inventory Planning Web App + Automated Schedule Optimization (MIP)
 
 Companion to `BUSINESS-LOGIC.md`. Three workstreams:

@@ -82,7 +82,7 @@ _When to revisit._ The correction already has a home: `switch_cost`, the cash te
 **Deep extract (9705) can be sold, not only charged**  
 _Decision._ Charge-only. 9705 carries no demand anywhere in the workbook, so there is no volume or price to model a sale with - and a half-modelled outlet with invented demand would distort the one real trade-off on the unit.  
 _What it costs._ Extraction's deep mode looks slightly less valuable than it is, and the model has one fewer relief valve when the hydrotreater is down: the plant can sell deep extract, the model can only back it up or downgrade it. It will therefore understate deep extraction and may run it below what the plant would - the conservative direction.  
-_When to revisit._ Once product netbacks exist (see MARGIN-OBJECTIVE.md), model it as a transfer that moves 9705 to its sale product at no cost and no yield loss - the same shape as RECYCLE_ROUTES, not a new demand row. That keeps one physical stream with two outlets rather than inventing a second product.
+_When to revisit._ Once product netbacks exist (see docs/archive/MARGIN-OBJECTIVE.md), model it as a transfer that moves 9705 to its sale product at no cost and no yield loss - the same shape as RECYCLE_ROUTES, not a new demand row. That keeps one physical stream with two outlets rather than inventing a second product.
 
 ## Solvers are ready
 

@@ -433,10 +433,16 @@ def test_a_rate_read_off_the_plan_is_never_presented_as_a_spec(built):
     to say so. A rate confirmed with operations is the one kind that is not.
 
     The four hydrotreater charges that motivated this still have no clean day -
-    but they are no longer grossed up, because grossing them up put three of them
-    above a unit that tops out at 5,200 bbl/day. Operations confirmed the limit,
-    so they carry a confirmed basis and keep `was` as the superseded figure. The
+    but they are no longer grossed up, because grossing them up put them above a
+    unit that tops out at 5,000 bbl/day. Operations confirmed the limit, so they
+    carry a confirmed basis and keep `was` as the superseded figure. The
     invariant being pinned is the general one, not those four rows.
+
+    9704 is the awkward one: 5,200 was read off four clean days, which is exactly
+    the kind of evidence this test exists to demote. The plan is known to carry
+    charge figures the unit cannot run - its single 8,500 HYDRO day is a crude
+    number typed on a hydrotreater row - so a clean day is evidence of what was
+    typed, not of what the unit can take. Operations win.
     """
     from invplanner import model_config as cfg
 
@@ -455,10 +461,12 @@ def test_a_rate_read_off_the_plan_is_never_presented_as_a_spec(built):
                            for w in spec.warnings), (unit, code)
 
     # No hydrotreater feed may sit above the unit's confirmed daily limit: the
-    # day-time budget is a weighted average, so a per-line ceiling above 5,200
+    # day-time budget is a weighted average, so a per-line ceiling above 5,000
     # lets a two-product day total more than the unit can physically charge.
+    # This is what makes a separate absolute unit cap unnecessary - and what
+    # would make one necessary the moment any HYDRO line is raised past 5,000.
     for code, info in cfg.MAX_RATE_BBL_PER_DAY["HYDRO"].items():
-        assert info["bbl"] <= 5200, (code, info["bbl"])
+        assert info["bbl"] <= 5000, (code, info["bbl"])
 
     for code in ("9711", "9712", "9703", "9720"):
         info = cfg.max_rate_info("HYDRO", code)

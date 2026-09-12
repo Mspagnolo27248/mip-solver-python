@@ -236,7 +236,7 @@ implemented exactly as §3.1–3.3. It is embarrassingly simple computationally 
 ## 7. Status: this decomposition is now executable
 
 Everything above is implemented and verified in `inv-planner/` (Phase 0 of
-`WEBAPP-MIP-PLAN.md`): a workbook importer, the simulation engine, and a parity
+`docs/archive/WEBAPP-MIP-PLAN.md`): a workbook importer, the simulation engine, and a parity
 harness that compares the engine against the workbook cell by cell.
 
 **200,026 balance cells and 18,360 production cells compared; 0 unexplained

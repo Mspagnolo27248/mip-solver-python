@@ -1,15 +1,15 @@
 {
   "v0-100-cost": {
-    "charge_bbl": 1469968,
+    "charge_bbl": 1469959,
     "charge_by_unit": {
       "EXTRACT": 175912,
-      "HYDRO": 377354,
-      "MEK": 263447,
+      "HYDRO": 376883,
+      "MEK": 263909,
       "PLATFORMER": 551884,
       "ROSE": 101370
     },
     "days": 100,
-    "downgrade_gal": 6846428,
+    "downgrade_gal": 6827038,
     "exact": true,
     "horizon_truncated_days": 0,
     "hydro": {
@@ -28,21 +28,21 @@
     "terminal_shortfall_gal": 579190
   },
   "v0-100-cost-noflush": {
-    "charge_bbl": 1470036,
+    "charge_bbl": 1469859,
     "charge_by_unit": {
       "EXTRACT": 175912,
-      "HYDRO": 377531,
+      "HYDRO": 377354,
       "MEK": 263447,
       "PLATFORMER": 551884,
       "ROSE": 101261
     },
     "days": 100,
-    "downgrade_gal": 6790528,
+    "downgrade_gal": 6846428,
     "exact": true,
     "horizon_truncated_days": 0,
     "hydro": {
-      "both_reactor_days": 12,
-      "startups": 12
+      "both_reactor_days": 10,
+      "startups": 13
     },
     "lost_by_product": {
       "1128": 67619,
@@ -56,10 +56,10 @@
     "terminal_shortfall_gal": 579190
   },
   "v0-100-cost-safety3": {
-    "charge_bbl": 1466128,
+    "charge_bbl": 1465979,
     "charge_by_unit": {
       "EXTRACT": 175912,
-      "HYDRO": 369776,
+      "HYDRO": 369627,
       "MEK": 265515,
       "PLATFORMER": 551884,
       "ROSE": 103040
@@ -84,16 +84,16 @@
     "terminal_shortfall_gal": 579190
   },
   "v0-100-margin": {
-    "charge_bbl": 1494424,
+    "charge_bbl": 1493848,
     "charge_by_unit": {
       "EXTRACT": 169455,
-      "HYDRO": 416149,
+      "HYDRO": 415572,
       "MEK": 235349,
       "PLATFORMER": 571857,
       "ROSE": 101615
     },
     "days": 100,
-    "downgrade_gal": 10194737,
+    "downgrade_gal": 10170991,
     "exact": true,
     "horizon_truncated_days": 0,
     "hydro": {
@@ -103,14 +103,14 @@
     "lost_by_product": {
       "4459": 16393,
       "9511": 1180395,
-      "DSL": 2141383
+      "DSL": 2005554
     },
-    "lost_sales_gal": 3338172,
-    "objective": 7251471.91,
+    "lost_sales_gal": 3202342,
+    "objective": 7241498.52,
     "schedule_gaps": 6,
-    "sink_offtake_gal": 6763803,
+    "sink_offtake_gal": 6604227,
     "status": "optimal",
-    "terminal_shortfall_gal": 5616463
+    "terminal_shortfall_gal": 5592716
   },
   "v0-42-blank": {
     "binding": {
@@ -124,16 +124,16 @@
     "status": "infeasible"
   },
   "v0-42-cost": {
-    "charge_bbl": 590145,
+    "charge_bbl": 590004,
     "charge_by_unit": {
       "EXTRACT": 69870,
-      "HYDRO": 153511,
+      "HYDRO": 153370,
       "MEK": 111760,
       "PLATFORMER": 210161,
       "ROSE": 44843
     },
     "days": 42,
-    "downgrade_gal": 2769062,
+    "downgrade_gal": 2794262,
     "exact": true,
     "horizon_truncated_days": 0,
     "hydro": {
@@ -144,23 +144,23 @@
       "9511": 774339
     },
     "lost_sales_gal": 774339,
-    "objective": 528492.59,
+    "objective": 529248.59,
     "schedule_gaps": 3,
     "sink_offtake_gal": 0,
     "status": "optimal",
     "terminal_shortfall_gal": 631865
   },
   "v0-42-margin": {
-    "charge_bbl": 620355,
+    "charge_bbl": 618859,
     "charge_by_unit": {
       "EXTRACT": 70460,
-      "HYDRO": 178895,
+      "HYDRO": 177399,
       "MEK": 100316,
       "PLATFORMER": 230134,
       "ROSE": 40550
     },
     "days": 42,
-    "downgrade_gal": 5574138,
+    "downgrade_gal": 5512565,
     "exact": true,
     "horizon_truncated_days": 0,
     "hydro": {
@@ -173,35 +173,35 @@
       "DSL": 403337
     },
     "lost_sales_gal": 1111620,
-    "objective": 6471418.08,
+    "objective": 6457147.41,
     "schedule_gaps": 3,
-    "sink_offtake_gal": 4027238,
+    "sink_offtake_gal": 3965665,
     "status": "optimal",
-    "terminal_shortfall_gal": 5186142
+    "terminal_shortfall_gal": 5124569
   },
   "v1-42-cost": {
     "campaigns": {
       "EXTRACT": {
-        "campaigns": 7,
-        "median_days": 4,
-        "switches": 6
+        "campaigns": 11,
+        "median_days": 2,
+        "switches": 10
       },
       "MEK": {
-        "campaigns": 10,
+        "campaigns": 12,
         "median_days": 3,
-        "switches": 9
+        "switches": 11
       }
     },
-    "charge_bbl": 593313,
+    "charge_bbl": 595950,
     "charge_by_unit": {
-      "EXTRACT": 72391,
-      "HYDRO": 152512,
-      "MEK": 114442,
+      "EXTRACT": 75863,
+      "HYDRO": 151903,
+      "MEK": 112281,
       "PLATFORMER": 210161,
-      "ROSE": 43807
+      "ROSE": 45742
     },
     "days": 42,
-    "downgrade_gal": 2630486,
+    "downgrade_gal": 2655686,
     "exact": false,
     "horizon_truncated_days": 0,
     "hydro": {
@@ -215,31 +215,31 @@
     "schedule_gaps": 3,
     "sink_offtake_gal": 0,
     "status": "feasible",
-    "terminal_shortfall_gal": 465273
+    "terminal_shortfall_gal": 479798
   },
   "v1-42-margin": {
     "campaigns": {
       "EXTRACT": {
-        "campaigns": 9,
-        "median_days": 3,
-        "switches": 8
+        "campaigns": 13,
+        "median_days": 2,
+        "switches": 12
       },
       "MEK": {
-        "campaigns": 13,
-        "median_days": 3,
-        "switches": 12
+        "campaigns": 15,
+        "median_days": 2,
+        "switches": 14
       }
     },
-    "charge_bbl": 636384,
+    "charge_bbl": 636512,
     "charge_by_unit": {
-      "EXTRACT": 75572,
-      "HYDRO": 178895,
-      "MEK": 111232,
+      "EXTRACT": 75830,
+      "HYDRO": 177399,
+      "MEK": 112599,
       "PLATFORMER": 230134,
       "ROSE": 40550
     },
     "days": 42,
-    "downgrade_gal": 5574950,
+    "downgrade_gal": 5513619,
     "exact": false,
     "horizon_truncated_days": 0,
     "hydro": {
@@ -247,57 +247,59 @@
       "startups": 5
     },
     "lost_by_product": {
-      "4459": 40519,
+      "4459": 37988,
       "9511": 692923,
-      "DSL": 2080032
+      "DSL": 1191761
     },
-    "lost_sales_gal": 2813474,
+    "lost_sales_gal": 1922671,
     "schedule_gaps": 3,
-    "sink_offtake_gal": 5703933,
+    "sink_offtake_gal": 4754089,
     "status": "optimal",
-    "terminal_shortfall_gal": 5678957
+    "terminal_shortfall_gal": 5610238
   },
   "v2-42-cost": {
     "campaigns": {
       "EXTRACT": {
-        "campaigns": 7,
-        "median_days": 4,
-        "switches": 6
+        "campaigns": 11,
+        "median_days": 2,
+        "switches": 10
       },
       "HYDRO": {
         "campaigns": 15,
-        "median_days": 3,
+        "median_days": 2,
         "switches": 14
       },
       "MEK": {
-        "campaigns": 10,
+        "campaigns": 12,
         "median_days": 3,
-        "switches": 9
+        "switches": 11
       }
     },
-    "charge_bbl": 594579,
+    "charge_bbl": 591729,
     "charge_by_unit": {
-      "EXTRACT": 72391,
-      "HYDRO": 153770,
-      "MEK": 114442,
+      "EXTRACT": 75863,
+      "HYDRO": 151801,
+      "MEK": 112281,
       "PLATFORMER": 210161,
-      "ROSE": 43814
+      "ROSE": 41623
     },
     "days": 42,
-    "downgrade_gal": 2499611,
+    "downgrade_gal": 2520402,
     "exact": false,
     "horizon_truncated_days": 0,
     "hydro": {
       "both_reactor_days": 1,
-      "startups": 6
+      "startups": 4
     },
     "lost_by_product": {
-      "9511": 774339
+      "4118": 1961,
+      "9511": 774339,
+      "9704": 19303
     },
-    "lost_sales_gal": 774339,
+    "lost_sales_gal": 795603,
     "schedule_gaps": 3,
     "sink_offtake_gal": 0,
     "status": "feasible",
-    "terminal_shortfall_gal": 553952
+    "terminal_shortfall_gal": 490919
   }
 }

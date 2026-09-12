@@ -198,6 +198,35 @@
       </details>
     </div>
     <div class="card">
+      <details class="collapsible" id="fill-panel">
+        <summary>
+          <span class="collapsible-mark" aria-hidden="true"></span>
+          <span>
+            <h3>Set a rate across the window</h3>
+            <p class="muted">Writes one rate onto every day in the range. This is how a plan is laid down from scratch — set the crude, ROSE and Platformer rates for the whole window, then clear the units you want the optimizer to schedule for you. Days a unit is down are skipped, and setting a rate on one line clears the other lines on that unit, since a unit runs one feed at a time.</p>
+          </span>
+        </summary>
+        <div class="feed-detail-head">
+          <div class="controls">
+            <label class="field"><span>Row</span><select id="fill-target"></select></label>
+            <label class="field"><span>Rate (bbl/day)</span><input id="fill-bbl" type="number" min="0" step="100" placeholder="0 clears"></label>
+            <label class="field" id="fill-mode-field"><span>Crude mode</span>
+              <select id="fill-mode">
+                <option value="">leave as is</option>
+                <option value="R">R — regular</option>
+                <option value="L">L — low volatility</option>
+              </select>
+            </label>
+            <label class="field"><span>From</span><input id="fill-start" type="date"></label>
+            <label class="field"><span>To</span><input id="fill-end" type="date"></label>
+            <label class="check" title="A day another line of the unit is already scheduled on is not a gap — the unit runs one feed at a time. Use this to fill the tail of a copied schedule without touching the part it covers."><input type="checkbox" id="fill-empty-only"><span>Only days the unit is idle</span></label>
+            <button id="fill-apply" class="btn">Apply</button>
+          </div>
+        </div>
+        <p id="fill-note" class="muted"></p>
+      </details>
+    </div>
+    <div class="card">
       <div id="sched-compare" class="controls compare-bar"></div>
       <div id="schedule-grid" class="table-wrap tall"></div>
     </div>
@@ -212,6 +241,18 @@
       </div>
       <button id="sync-all" class="btn">Re-sync all feeds</button>
     </div>
+
+    <div class="card" id="feed-uploads">
+      <div class="feed-detail-head">
+        <div>
+          <h3>Upload source files</h3>
+          <p class="muted">Load the small exports directly instead of re-importing the 6 MB planning workbook. Each file replaces its own feed; anything you have not uploaded keeps reading the workbook. A file whose columns have moved is rejected rather than half-imported, and your overrides survive as always. Uploading updates <em>source data only</em> — an open scenario keeps the numbers it was frozen with, so create a new one to plan on what you just loaded.</p>
+        </div>
+        <button id="upload-scenario" class="btn">Create scenario from source data</button>
+      </div>
+      <div id="upload-slots" class="feed-grid" style="padding: 14px 16px 0"></div>
+    </div>
+
     <div id="feed-cards" class="feed-grid"></div>
     <div class="card" id="feed-detail" hidden>
       <div class="feed-detail-head">

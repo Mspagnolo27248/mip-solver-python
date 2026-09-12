@@ -625,20 +625,31 @@ def test_the_horizon_is_capped_at_the_last_believable_day(solved):
     zero, and the reason - crude still running with no unit scheduled to consume
     the feeds - took an elastic diagnostic to find.
 
-    Confirmed with operations: the demand inputs are wrong past 2026-12-31.
+    The boundary is **derived, not written down**: it is the last day the planner
+    filled in a charge on a unit that decides things. On this workbook that is
+    2026-12-31, which is what the constant used to say - so the number is pinned
+    here as a fact about the seed data, not as a fact about the calendar.
     """
     from invplanner import model_config as cfg
     import datetime as dt
 
-    assert cfg.DATA_VALID_THROUGH == dt.date(2026, 12, 31)
+    ref, scn, spec, _, _ = solved
+
+    assert cfg.DATA_VALID_THROUGH is None, "the override should normally be off"
+    assert cfg.schedule_valid_through(scn) == dt.date(2026, 12, 31)
+    assert cfg.valid_through(scn) == dt.date(2026, 12, 31)
+
     kept = cfg.clamp_horizon([dt.date(2026, 12, 30), dt.date(2026, 12, 31),
-                              dt.date(2027, 1, 1), dt.date(2027, 7, 23)])
+                              dt.date(2027, 1, 1), dt.date(2027, 7, 23)], scn)
     assert kept == [dt.date(2026, 12, 30), dt.date(2026, 12, 31)]
+
+    # With nothing to measure against, the dates pass through. Inventing a
+    # boundary would be worse than having none.
+    assert cfg.clamp_horizon([dt.date(2027, 7, 23)]) == [dt.date(2027, 7, 23)]
 
     # A horizon entirely past the boundary is refused, not solved. This returns
     # before the spec is touched, so the module's 14-day spec is irrelevant here.
     from invplanner.optimizer import v0
-    ref, scn, spec, _, _ = solved
     past = [dt.date(2027, 1, 5), dt.date(2027, 1, 6)]
     res = v0.solve(ref, scn, spec, PARAMS, horizon=past)
     assert res.status == "no_solution", res.status
@@ -647,7 +658,41 @@ def test_the_horizon_is_capped_at_the_last_believable_day(solved):
     # 160 days is the longest that solves; the 161st adds one tank overflow
     assert cfg.MAX_SOLVABLE_DAYS == 160
     assert (scn.dates[cfg.MAX_SOLVABLE_DAYS - 1]
-            <= cfg.DATA_VALID_THROUGH), "the solvable window must sit inside the believable one"
+            <= cfg.valid_through(scn)), "the solvable window must sit inside the believable one"
+
+
+def test_extending_the_schedule_extends_the_horizon(solved):
+    """The boundary follows the plan, which is the whole reason it is derived.
+
+    Hard-coded, a planner who filled in another month got the same silent
+    truncation and no way to see why - the fix was to edit a date in the config,
+    which nobody outside this repo can do. Derived, the horizon they can ask for
+    grows the moment they extend the grid.
+    """
+    from invplanner import model_config as cfg
+    import copy, datetime as dt
+
+    _, scn, _, _, _ = solved
+    scn = copy.deepcopy(scn)
+    before = cfg.valid_through(scn)
+
+    for i in range(1, 46):
+        day = (before + dt.timedelta(days=i)).isoformat()
+        scn.charge_lines.setdefault("MEK#69", {})[day] = 3500.0
+
+    assert cfg.valid_through(scn) == before + dt.timedelta(days=45)
+    assert len(cfg.clamp_horizon(scn.dates, scn)) == \
+        len(cfg.clamp_horizon(scn.dates, solved[1])) + 45
+
+    # A transfer line is not a charge decision, so filling one in must not move
+    # the boundary - otherwise a downgrade the planner typed would license days
+    # on which nothing is scheduled to charge the lube units at all.
+    scn2 = copy.deepcopy(solved[1])
+    edge = cfg.valid_through(scn2)
+    for i in range(1, 31):
+        day = (edge + dt.timedelta(days=i)).isoformat()
+        scn2.charge_lines.setdefault("TRANSFER_DIESEL#111", {})[day] = 900.0
+    assert cfg.valid_through(scn2) == edge
 
 
 # ------------------------------------------------- the hydrotreater's reactors

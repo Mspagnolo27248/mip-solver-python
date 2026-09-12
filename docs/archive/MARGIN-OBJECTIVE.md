@@ -1,3 +1,13 @@
+> **Archived 2026-09-12 — superseded by `MARGIN-AND-CAMPAIGNS.md`.** The argument
+> in section 2 (margin per gallon, and why crude cost must not be attributed per
+> product) and the limits in section 6 still hold and are the reason to keep this
+> file. Everything procedural is overtaken: the netbacks of section 4 were
+> collected before `MARGIN-AND-CAMPAIGNS.md` was written (32 operations figures,
+> 100% of real demand priced), the changes of section 3 are built
+> (`objective="margin"`, opt-in), and guardrail 1 of section 5 is **invalid** -
+> see `MARGIN-AND-CAMPAIGNS.md` section 4 for why equal netbacks cannot reproduce
+> the cost answer. Line references elsewhere in the repo point past this header.
+
 # Pricing the model in real margin
 
 Companion to `MIP-FORMULATION.md`. That document costs the plan in avoided losses;

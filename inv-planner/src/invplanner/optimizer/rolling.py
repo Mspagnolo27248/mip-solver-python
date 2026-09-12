@@ -81,7 +81,7 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     """
     model = model or v0
     dates = list(horizon or scn.dates[:params.get("horizon_days", 42)])
-    dates = cfg.clamp_horizon(dates)
+    dates = cfg.clamp_horizon(dates, scn)
     window = int(params.get("window_days") or DEFAULT_WINDOW)
     commit = int(params.get("commit_days") or DEFAULT_COMMIT)
     if commit >= window:

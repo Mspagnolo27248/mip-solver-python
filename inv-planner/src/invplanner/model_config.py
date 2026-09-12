@@ -494,26 +494,39 @@ MAX_RATE_BBL_PER_DAY: Dict[str, Dict[str, Dict[str, Any]]] = {
         # unit can take.
         "9705": {"bbl": 3000, "basis": "confirmed with operations",
                  "clean_days": 1},
-        "9704": {"bbl": 5200, "basis": "clean day", "clean_days": 4},
-        # Confirmed with operations: no hydrotreater feed runs above 5,000-5,200
-        # bbl/day, and the unit itself cannot exceed that in a day whatever mix
-        # it runs. These four had no clean day to read, so they were grossed up
-        # from partial days by one changeover's loss - and grossing up an
-        # observation is only sound if the result stays inside the unit's real
-        # limit, which these did not: 5,943 is 14% above a unit that tops out at
-        # 5,200. The arithmetic was right and the answer was still wrong, which
-        # is exactly what `basis: grossed up` was meant to flag for checking.
+        # 5,200 was read off 4 clean days, and operations say the unit does not
+        # go there. The observation loses: the plan is known to carry charge
+        # figures the unit cannot run - its single 8,500 HYDRO day is a crude
+        # number on a hydrotreater row - so a clean day is evidence of what was
+        # *typed*, not of what the unit can take.
+        "9704": {"bbl": 5000, "basis": "confirmed with operations",
+                 "clean_days": 4, "was": 5200},
+        # Confirmed with operations: the hydrotreater tops out at 5,000 bbl/day
+        # for the *unit*, whatever mix it runs. These four had no clean day to
+        # read, so they were grossed up from partial days by one changeover's
+        # loss - and grossing up an observation is only sound if the result stays
+        # inside the unit's real limit, which these did not: 5,943 is 19% above a
+        # unit that tops out at 5,000. The arithmetic was right and the answer was
+        # still wrong, which is exactly what `basis: grossed up` was meant to flag.
         #
-        # Held at the top of the stated range pending the per-feed figures. Each
-        # of these is a *unit* limit standing in for a product rate, so any of
-        # them may still be too high individually - none can be too low.
-        "9711": {"bbl": 5200, "basis": "confirmed with operations",
+        # Held at the unit limit pending per-feed figures. Each of these is a
+        # *unit* limit standing in for a product rate, so any of them may still be
+        # too high individually - none can be too low.
+        #
+        # **Why no separate unit-level cap is needed.** The day-time budget makes
+        # a unit's daily total a convex combination of its line rates:
+        # `sum(chg[k]) <= sum(rate[k] * tfrac[k]) <= max(rate) * sum(tfrac) <= max(rate)`.
+        # So the total is bounded by the *highest* line ceiling, and with every
+        # HYDRO line at or below 5,000 the unit constraint holds for free. That
+        # stops being true the moment any HYDRO line is raised above 5,000, at
+        # which point an explicit absolute cap becomes necessary.
+        "9711": {"bbl": 5000, "basis": "confirmed with operations",
                  "clean_days": 0, "was": 5943},
-        "9712": {"bbl": 5200, "basis": "confirmed with operations",
+        "9712": {"bbl": 5000, "basis": "confirmed with operations",
                  "clean_days": 0, "was": 5943},
-        "9703": {"bbl": 5200, "basis": "confirmed with operations",
+        "9703": {"bbl": 5000, "basis": "confirmed with operations",
                  "clean_days": 0, "was": 5714},
-        "9720": {"bbl": 5200, "basis": "confirmed with operations",
+        "9720": {"bbl": 5000, "basis": "confirmed with operations",
                  "clean_days": 0, "was": 5486},
     },
     "EXTRACT": {
@@ -887,7 +900,8 @@ DECIDED_NOT_MODELLED: List[Dict[str, str]] = [
                 "model can only back it up or downgrade it. It will therefore "
                 "understate deep extraction and may run it below what the "
                 "plant would - the conservative direction.",
-        "when": "Once product netbacks exist (see MARGIN-OBJECTIVE.md), model "
+        "when": "Once product netbacks exist (see docs/archive/MARGIN-OBJECTIVE.md), "
+        "model "
                 "it as a transfer that moves 9705 to its sale product at no "
                 "cost and no yield loss - the same shape as RECYCLE_ROUTES, "
                 "not a new demand row. That keeps one physical stream with two "
@@ -992,24 +1006,93 @@ SAFETY_STOCK_GAL: Dict[str, float] = {}
 #: worth knowing before anyone goes looking for a deep cause. It is also why
 #: every report in `data/reports` is named `*-160`: the edge was found
 #: empirically before it was explained.
-DATA_VALID_THROUGH = _dt.date(2026, 12, 31)
+#:
+#: **The date used to be written here as 2026-12-31 and is now derived.** The
+#: boundary was never a fact about the calendar - it is a fact about how far the
+#: planner has filled the schedule in, and it moves the moment they fill in more.
+#: Hard-coding it meant a planner who extended their plan by a month got the same
+#: silent truncation and no way to see why, and it would have had to be edited by
+#: hand on every input refresh. `schedule_valid_through` reads it off the data
+#: instead. On the workbook this comment was written against, it returns
+#: 2026-12-31 - the same day, now for a reason the code can restate.
+#:
+#: Set this to a real date to override the derivation; `None` means derive.
+DATA_VALID_THROUGH: Optional[_dt.date] = None
 
 #: The longest horizon that actually solves. See above for what the 161st day
-#: costs. Kept separate from `DATA_VALID_THROUGH` because they are different
-#: claims: one is about the data, the other about this plan's tank levels, and a
-#: revised plan could move the second without touching the first.
+#: costs. Kept separate from the believable-data boundary because they are
+#: different claims: one is about the data, the other about this plan's tank
+#: levels, and a revised plan could move the second without touching the first.
 MAX_SOLVABLE_DAYS = 160
 
 
-def clamp_horizon(dates: List[Any]) -> List[Any]:
+def schedule_valid_through(scn: Any) -> Optional[_dt.date]:
+    """The last day the planner filled in a charge on a unit that decides things.
+
+    This is the boundary, and the reason is the asymmetry between what stops and
+    what does not. Crude is a fixed input: it keeps arriving whatever the
+    schedule says. So on the first day past the end of the planner's grid the
+    side streams still land, nothing is scheduled to consume them, and the feed
+    tanks fill until they burst - 9117 alone by 9.8 M gal/day. That is what made
+    a full-year run infeasible at every charge floor including zero.
+
+    Demand is not the binding half, despite what the comment above used to imply.
+    The sales forecast, blend demand and base-oil transfers are all *monthly*
+    rates, so they cover any day the model asks about; only the firm open orders
+    are dated, and they stop earlier still (2026-10-15) with forecast covering
+    the rest by design. It is the schedule that runs out, so the schedule is what
+    is measured.
+
+    Transfer and cascade lines are ignored deliberately. A transfer line carries
+    a downgrade the planner wrote, not a charge decision, and the platformer runs
+    to the end of the date columns because it is fed by crude rather than
+    scheduled - counting either would push the boundary out past the point where
+    anything is actually charging the lube units.
+
+    Returns `None` when the scenario carries no charges at all, which means "do
+    not clamp" rather than "clamp to nothing": a caller with an empty grid has a
+    different problem, and truncating its horizon to zero would hide it.
+    """
+    lines = getattr(scn, "charge_lines", None) or {}
+    last = None
+    for key, series in lines.items():
+        if not is_decision_unit(str(key).split("#")[0]):
+            continue
+        for iso, bbl in (series or {}).items():
+            if not bbl or bbl <= 0:
+                continue
+            if last is None or iso > last:
+                last = iso
+    if last is None:
+        return None
+    y, m, d = (int(x) for x in str(last).split("-"))
+    return _dt.date(y, m, d)
+
+
+def valid_through(scn: Any = None) -> Optional[_dt.date]:
+    """The boundary in force: the override if one is set, else the derivation."""
+    if DATA_VALID_THROUGH is not None:
+        return DATA_VALID_THROUGH
+    return schedule_valid_through(scn) if scn is not None else None
+
+
+def clamp_horizon(dates: List[Any], scn: Any = None) -> List[Any]:
     """Cut a horizon back to the last day the inputs can be believed.
 
     Silently truncating is the wrong instinct in general, but here the
     alternative is worse: the model does not fail on bad days, it produces a
     confident schedule built on demand nobody stands behind, or an infeasibility
     whose real cause is three layers away from the error.
+
+    With no scenario and no override there is nothing to measure the horizon
+    against, so the dates pass through untouched. That is the honest answer -
+    inventing a boundary would be worse than having none - and it is why every
+    caller inside the optimizer passes `scn`.
     """
-    return [d for d in dates if d <= DATA_VALID_THROUGH]
+    through = valid_through(scn)
+    if through is None:
+        return list(dates)
+    return [d for d in dates if d <= through]
 
 
 #: A unit runs at most this many charge products in a day.

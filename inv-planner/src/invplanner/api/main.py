@@ -7,14 +7,15 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .. import exporter, groups
+from .. import exporter, feedsheets, groups
 from .. import model_config as cfg
+from ..db import connectors
 from ..db import optimizer_service as optsvc
 from ..db import reference_edit as refedit
 from ..db import service as svc
@@ -57,6 +58,30 @@ class ScheduleEdit(BaseModel):
     line_key: str
     date: dt.date
     bbl: float
+    actor: str = "planner"
+
+
+class ScheduleFill(BaseModel):
+    """Bulk edit: one rate over a range of days.
+
+    `target` is CRUDE, a line key like ROSE#97, or a bare unit name - the last
+    only to clear it, since a unit runs one line at a time.
+    """
+    target: str
+    bbl: float = 0.0
+    start: Optional[dt.date] = None
+    end: Optional[dt.date] = None
+    mode: Optional[str] = None
+    #: Outage days are left alone. The optimizer creates no variable on them, so
+    #: anything typed there survives into a result unnoticed.
+    skip_downtime: bool = True
+    #: Off, only days the *unit* is idle are written - a day another of its
+    #: lines is scheduled on is not a gap, and writing into it would clear that
+    #: line. This is how the tail of a copied schedule is filled without
+    #: disturbing the part it covers.
+    overwrite: bool = True
+    #: Clear the other lines on the same unit over the same days.
+    exclusive: bool = True
     actor: str = "planner"
 
 
@@ -137,8 +162,8 @@ def patch_cell(cell_id: int, body: OverrideIn,
 @app.post("/api/feeds/{feed}/sync")
 def sync_one(feed: str, actor: str = "planner",
              db: Session = Depends(get_session)) -> Dict[str, Any]:
-    from ..db.connectors import default_connectors
-    conn = next((c for c in default_connectors(svc.SEED_DIR) if c.feed == feed), None)
+    conn = next((c for c in connectors.default_connectors(svc.SEED_DIR)
+                 if c.feed == feed), None)
     if conn is None:
         raise HTTPException(404, "no connector for feed {}".format(feed))
     batch = svc.sync_feed(db, conn, actor)
@@ -151,6 +176,106 @@ def sync_everything(actor: str = "planner",
     batches = svc.sync_all(db, actor)
     return {"batches": [{"feed": b.feed, "id": b.id, "rows": b.row_count}
                         for b in batches]}
+
+
+# ------------------------------------------------------- uploaded feed sheets
+#: A feed export is tens of kilobytes; the planning workbook is 6 MB. The cap is
+#: generous enough for a bad export and small enough that nothing has to stream.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+def _upload_state() -> List[Dict[str, Any]]:
+    out = []
+    for kind in feedsheets.KINDS:
+        path = connectors.upload_path(svc.SEED_DIR, kind)
+        loaded = os.path.exists(path)
+        out.append({
+            "kind": kind,
+            "title": feedsheets.KIND_TITLES[kind],
+            "shape": feedsheets.KIND_SHAPES[kind],
+            "feeds": list(feedsheets.KIND_FEEDS[kind]),
+            "loaded": loaded,
+            "uploaded_at": (dt.datetime.fromtimestamp(os.path.getmtime(path))
+                            .isoformat() if loaded else None),
+            "bytes": os.path.getsize(path) if loaded else None,
+        })
+    return out
+
+
+@app.get("/api/feeds/uploads")
+def list_feed_uploads() -> Dict[str, Any]:
+    """Which feeds are reading from an uploaded sheet rather than the workbook."""
+    return {"kinds": _upload_state(),
+            "dir": connectors.upload_dir(svc.SEED_DIR)}
+
+
+@app.post("/api/feeds/upload/{kind}")
+async def upload_feed_sheet(kind: str, request: Request, actor: str = "planner",
+                            db: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Take one feed workbook as the raw request body and sync what it supplies.
+
+    The body is the file itself rather than a multipart form: the browser sends
+    it with `fetch(url, {method: 'POST', body: file})` in one line, and it keeps
+    python-multipart off the dependency list.
+
+    The upload is parsed before it replaces anything, so a sheet whose columns
+    have moved is rejected while the feed that currently works keeps working.
+    """
+    if kind not in feedsheets.KIND_FEEDS:
+        raise HTTPException(404, "unknown sheet kind {!r}; expected one of {}".format(
+            kind, ", ".join(feedsheets.KINDS)))
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "empty upload")
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "upload is {:.1f} MB; the limit is {} MB".format(
+            len(body) / 1e6, MAX_UPLOAD_BYTES // (1024 * 1024)))
+
+    dest = connectors.upload_path(svc.SEED_DIR, kind)
+    # Held in a subfolder rather than under a ".part" suffix: openpyxl refuses a
+    # file whose extension it does not know, and the name it is parsed under is
+    # the name any complaint about the sheet will quote back to the planner.
+    staged = os.path.join(os.path.dirname(dest), "incoming",
+                          os.path.basename(dest))
+    os.makedirs(os.path.dirname(staged), exist_ok=True)
+    with open(staged, "wb") as fh:
+        fh.write(body)
+    try:
+        parsed = feedsheets.read(kind, staged)
+    except feedsheets.FeedSheetError as exc:
+        os.remove(staged)
+        raise HTTPException(400, str(exc))
+    os.replace(staged, dest)
+
+    conns = {c.feed: c for c in connectors.default_connectors(svc.SEED_DIR)}
+    results = []
+    for feed in feedsheets.KIND_FEEDS[kind]:
+        batch = svc.sync_feed(db, conns[feed], actor)
+        results.append({"feed": feed, "batch": batch.id,
+                        "rows": batch.row_count, "meta": batch.meta,
+                        "products": len(parsed[feed].values)})
+    notes = sorted(set(n for d in parsed.values() for n in d.notes))
+    return {"kind": kind, "bytes": len(body), "feeds": results, "notes": notes,
+            "uploads": _upload_state()}
+
+
+@app.delete("/api/feeds/upload/{kind}")
+def clear_feed_upload(kind: str, actor: str = "planner",
+                      db: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Drop an uploaded sheet and put its feeds back on the workbook seed."""
+    if kind not in feedsheets.KIND_FEEDS:
+        raise HTTPException(404, "unknown sheet kind {!r}".format(kind))
+    path = connectors.upload_path(svc.SEED_DIR, kind)
+    if not os.path.exists(path):
+        raise HTTPException(404, "no {} sheet is uploaded".format(kind))
+    os.remove(path)
+
+    conns = {c.feed: c for c in connectors.default_connectors(svc.SEED_DIR)}
+    results = []
+    for feed in feedsheets.KIND_FEEDS[kind]:
+        batch = svc.sync_feed(db, conns[feed], actor)
+        results.append({"feed": feed, "batch": batch.id, "rows": batch.row_count})
+    return {"kind": kind, "feeds": results, "uploads": _upload_state()}
 
 
 @app.get("/api/feeds/{feed}/batches")
@@ -212,7 +337,13 @@ def get_optimizer_params(db: Session = Depends(get_session)) -> Dict[str, Any]:
 def patch_optimizer_params(body: Dict[str, Any],
                            db: Session = Depends(get_session)) -> Dict[str, Any]:
     actor = body.pop("actor", "planner")
-    row = optsvc.update_params(db, body, actor)
+    try:
+        row = optsvc.update_params(db, body, actor)
+    except ValueError as e:
+        # A value outside its range is a mistake, not a setting. Rejected here so
+        # the field keeps its last good value rather than carrying nonsense into
+        # a 15-minute solve that then fails for reasons that look like the model.
+        raise HTTPException(400, str(e))
     return optsvc.params_dict(row)
 
 
@@ -714,6 +845,31 @@ def edit_schedule(scenario_id: int, body: ScheduleEdit,
     db.commit()
     svc.invalidate(s.id)
     return {"ok": True, "schedule_version": s.schedule_version}
+
+
+@app.post("/api/scenarios/{scenario_id}/schedule/fill")
+def fill_schedule(scenario_id: int, body: ScheduleFill,
+                  db: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Set one rate across a date range, or clear a unit over it.
+
+    The cell-at-a-time PATCH above is the right shape for correcting a schedule
+    and the wrong one for building one. Setting up a cold start means writing the
+    same crude, ROSE and Platformer rate onto every day of the window and
+    emptying the units the optimizer is meant to decide - hundreds of cells, all
+    of which have to be right or the run is planning against a schedule nobody
+    typed on purpose.
+    """
+    s = _get_scenario(db, scenario_id)
+    ref = svc.engine_reference(db, s.reference_version_id)
+    live = {l["key"] for l in cfg.live_charge_lines(ref.charge_lines)}
+    try:
+        return svc.fill_schedule(
+            db, s.id, body.target, body.bbl, body.start, body.end,
+            mode=body.mode, skip_downtime=body.skip_downtime,
+            overwrite=body.overwrite, exclusive=body.exclusive,
+            live_keys=live, actor=body.actor)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/scenarios/{scenario_id}/downtime")

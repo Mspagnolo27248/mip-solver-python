@@ -65,6 +65,34 @@ from . import v0
 STAGE_ONE: List[str] = ["MEK", "EXTRACT"]
 
 #: Stage two: the unit that has to be solved alone to be solved at all.
+#:
+#: **Do not clear this unit's schedule to "free" it.** It is freed here whatever
+#: the grid holds - handed the plan's 107 hydrotreater cells over a 100-day
+#: window it kept exactly one of them - so deleting the rows buys no freedom and
+#: costs stage one its only picture of what the hydrotreater draws.
+#:
+#: A unit that is neither freed nor pinned is a fixed assignment, and `v0` gives
+#: a fixed line a charge variable only on days the schedule already names one
+#: (`v0.py`, "assignment fixed: not scheduled"). So with the rows deleted, six of
+#: the seven lines get no variable on any day of stage one - only HYDRO#76
+#: survives, because it is flow-through - and stage one sizes MEK and extraction
+#: against a plant where nothing consumes 9704, 9705, 9711, 9712, 9703 or 9720.
+#: Stage two then frees the hydrotreater and pins MEK and extraction to that
+#: answer, so the feeds are not where it needs them.
+#:
+#: Measured on the same scenario, the same parameters and one difference - the
+#: hydrotreater's rows kept or deleted:
+#:
+#:     rows kept     stage one   1,523,917    run verified
+#:     rows deleted  stage one  18,550,315    run unverified: 65,313 gal of 9704
+#:                                            the tanks cannot supply, 124,039
+#:                                            gal of 9302 with no outlet
+#:
+#: A round trip - solve stage one, stage two, then stage one again against a real
+#: hydrotreater - was tried and does not rescue it: pass three comes back
+#: infeasible, because pinning the hydrotreater exactly to a schedule built
+#: against the wrong stage one over-constrains the balance. Sizing the two stages
+#: against each other properly is an open problem, not a missing flag.
 STAGE_TWO: List[str] = ["HYDRO"]
 
 #: Share of the run's time budget stage one may take. Stage two is the harder

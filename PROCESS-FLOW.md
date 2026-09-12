@@ -143,4 +143,6 @@ arithmetic.
 | — | EXTRACT 9303 | 1,800 recorded, 2,100 actually run |
 
 See `data/reports/open-items.md` for the full list, `MIP-FORMULATION.md` for the
-optimization model and `MARGIN-OBJECTIVE.md` for pricing it in real margin.
+optimization model, `SCHEDULING-MODEL.md` for the scheduling models as built
+and `MARGIN-AND-CAMPAIGNS.md` for pricing it in real margin
+(its predecessor, `docs/archive/MARGIN-OBJECTIVE.md`, is archived).

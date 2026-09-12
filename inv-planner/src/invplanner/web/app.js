@@ -12,6 +12,7 @@ const state = {
   block: null,
   feeds: [],
   feed: null,
+  uploads: [],
   schedOffset: 0,
   dashGroups: null,
   dashGroup: null,
@@ -621,6 +622,99 @@ async function loadSchedule() {
   }
   $('#schedule-grid').replaceChildren(table(head, rows, [0]));
   drawDowntime(d);
+  drawFill(d);
+}
+
+/* ------------------------------------------------------------------ fill */
+/* Building a plan is not the same job as correcting one. The grid edits a cell
+   at a time, which is right for a fix and hopeless for laying a rate down over a
+   366-day window - and that is exactly what a cold start is: crude, ROSE and the
+   Platformer written across every day, and the units the optimizer is meant to
+   decide for emptied. Done by hand it is several hundred keystrokes per row, and
+   the run is only as good as the last cell that got typed. */
+function drawFill(d) {
+  const sel = $('#fill-target');
+  const units = d.units.map((u) => u.unit);
+  const sig = units.join('|');
+  if (sel.dataset.sig !== sig) {
+    const keep = sel.value;
+    sel.replaceChildren(
+      el('optgroup', { label: 'Crude' },
+        el('option', { value: 'CRUDE' }, 'Crude unit — charge')),
+      ...d.units.map((u) => el('optgroup', { label: u.unit },
+        u.lines.map((l) => el('option', { value: l.key },
+          `${l.code} ${l.name || ''}`.trim())))),
+      // Clearing a unit is its own operation, not a rate of zero on one line:
+      // it is what hands the optimizer an empty schedule to decide for.
+      el('optgroup', { label: 'Clear a whole unit' },
+        units.map((u) => el('option', { value: u }, `${u} — clear every line`))));
+    sel.dataset.sig = sig;
+    if (keep) sel.value = keep;
+    if (!sel.value) sel.value = 'CRUDE';
+  }
+  // Default to the whole window, and reset when the scenario changes - a range
+  // left over from the previous scenario can sit outside this one entirely, and
+  // a fill that silently wrote nothing would look like a fill that worked.
+  const s = state.scenario;
+  const last = new Date(Date.parse(`${s.as_of}T00:00:00Z`)
+    + (s.horizon_days - 1) * 86400000).toISOString().slice(0, 10);
+  const panel = $('#fill-panel');
+  if (panel.dataset.scn !== String(s.id)) {
+    panel.dataset.scn = String(s.id);
+    $('#fill-start').value = s.as_of;
+    $('#fill-end').value = last;
+    $('#fill-note').textContent = '';
+  }
+  $('#fill-start').min = s.as_of; $('#fill-start').max = last;
+  $('#fill-end').min = s.as_of; $('#fill-end').max = last;
+  fillTargetChanged();
+}
+
+/* A whole-unit target can only clear, so the rate box is not a choice there and
+   should not look like one. The crude mode is the mirror image: meaningless on
+   any other row. */
+function fillTargetChanged() {
+  const t = $('#fill-target').value || '';
+  const wholeUnit = t !== 'CRUDE' && !t.includes('#');
+  const bbl = $('#fill-bbl');
+  bbl.disabled = wholeUnit;
+  bbl.placeholder = wholeUnit ? 'clears the unit' : '0 clears';
+  if (wholeUnit) bbl.value = '';
+  $('#fill-mode-field').style.display = t === 'CRUDE' ? '' : 'none';
+}
+
+async function applyFill() {
+  if (!state.scenario) return;
+  const target = $('#fill-target').value;
+  const wholeUnit = target !== 'CRUDE' && !target.includes('#');
+  const bbl = wholeUnit ? 0 : (parseFloat($('#fill-bbl').value) || 0);
+  const start = $('#fill-start').value;
+  const end = $('#fill-end').value;
+  if (end && start && end < start) { toast('End date is before the start date'); return; }
+  const mode = target === 'CRUDE' ? ($('#fill-mode').value || null) : null;
+  // Overwriting hundreds of cells is not undoable from here, so the one thing
+  // that is easy to get wrong - the range - is read back before it happens.
+  const what = bbl
+    ? `set ${target} to ${fmt(bbl)} bbl/day`
+    : `clear ${target}`;
+  if (!window.confirm(`${what} on every day from ${start} to ${end}?`)) return;
+
+  const r = await api(`/api/scenarios/${state.scenario.id}/schedule/fill`, {
+    method: 'POST',
+    body: JSON.stringify({
+      target, bbl, start, end, mode,
+      overwrite: !$('#fill-empty-only').checked,
+    }),
+  });
+  const bits = [`${r.cells} cell${r.cells === 1 ? '' : 's'} written`];
+  if (r.skipped_downtime) bits.push(`${r.skipped_downtime} outage day(s) skipped`);
+  if (r.siblings_cleared) {
+    bits.push(`${r.siblings_cleared} cleared on ${r.siblings.join(', ')}`);
+  }
+  $('#fill-note').textContent =
+    `${what} · ${r.start} to ${r.end} · ${bits.join(' · ')}`;
+  toast(bits.join(' · '));
+  loadSchedule();
 }
 
 /* -------------------------------------------------------------- downtime */
@@ -768,6 +862,7 @@ async function editCrude(date, bbl, mode) {
 /* ----------------------------------------------------------------- feeds */
 async function loadFeeds() {
   state.feeds = await api('/api/feeds');
+  await loadUploadSlots();
   const host = $('#feed-cards');
   host.replaceChildren(...state.feeds.map((f) =>
     el('button', {
@@ -786,6 +881,65 @@ async function loadFeeds() {
         f.last_sync ? `synced ${new Date(f.last_sync).toLocaleString()}` : 'never synced'),
     )));
   if (state.feed) await loadFeedRows();
+}
+
+/* One card per uploadable sheet. The file goes up as the raw request body
+ * rather than a form post, which is why there is no <form> here at all. */
+async function loadUploadSlots() {
+  const d = await api('/api/feeds/uploads');
+  state.uploads = d.kinds;
+  $('#upload-slots').replaceChildren(...d.kinds.map((k) => {
+    const input = el('input', {
+      type: 'file',
+      accept: '.xlsx,.xlsm',
+      style: 'display:none',
+      onchange: (e) => uploadSheet(k.kind, e.target.files[0], e.target),
+    });
+    return el('div', { class: 'feed-card' },
+      el('h3', {}, k.title),
+      el('p', { class: 'muted' }, k.shape),
+      el('p', { class: 'muted', style: 'margin-top:8px;font-size:11px' },
+        k.loaded
+          ? `uploaded ${new Date(k.uploaded_at).toLocaleString()}`
+          : 'reading from the planning workbook'),
+      el('div', { style: 'margin-top:10px;display:flex;gap:10px;align-items:center' },
+        input,
+        el('button', { class: 'btn ghost', onclick: () => input.click() },
+          k.loaded ? 'Replace file' : 'Choose file'),
+        k.loaded
+          ? el('button', {
+            class: 'linkish',
+            title: 'Delete the uploaded file and read this feed from the workbook again',
+            onclick: () => clearUpload(k.kind),
+          }, 'use workbook')
+          : null));
+  }));
+}
+
+async function uploadSheet(kind, file, input) {
+  if (!file) return;
+  toast(`Reading ${file.name}…`);
+  let d;
+  try {
+    d = await api(`/api/feeds/upload/${kind}`, { method: 'POST', body: file,
+      headers: {} });
+  } finally {
+    // Let the same file be picked again after a rejection, which the change
+    // event would otherwise swallow as "no change".
+    input.value = '';
+  }
+  const rows = d.feeds.reduce((n, f) => n + f.rows, 0);
+  toast(`${file.name}: ${fmt(rows)} values into ${d.feeds.map((f) => f.feed).join(' + ')}`);
+  d.notes.forEach((n) => console.info(`${kind}: ${n}`));
+  await loadFeeds();
+}
+
+async function clearUpload(kind) {
+  if (!confirm('Delete the uploaded file and read this feed from the planning '
+    + 'workbook again? Your overrides are kept either way.')) return;
+  await api(`/api/feeds/upload/${kind}`, { method: 'DELETE' });
+  toast('Back on the workbook seed for this feed');
+  await loadFeeds();
 }
 
 async function openFeed(feed) {
@@ -968,6 +1122,12 @@ async function loadOptParams() {
       cost: 'cost — minimise what the plan gives up',
       margin: 'margin — maximise what it earns',
     },
+    // Booleans belong here for the same reason the other two do: a number box
+    // would turn the value into NaN, and the API reads the posted string.
+    must_run: {
+      true: 'on — every unit runs daily (the plant)',
+      false: 'off — units may idle (cold start)',
+    },
   };
 
   // Grouped, because these answer three different questions and a planner
@@ -979,8 +1139,8 @@ async function loadOptParams() {
       'netback_gasoline_per_gal', 'switch_cost',
       'terminal_shortfall_per_gal']],
     ['How much freedom the model has', ['model_version', 'objective',
-      'charge_floor_fraction', 'terminal_value_fraction', 'safety_stock_days',
-      'horizon_days']],
+      'must_run', 'min_rate_fraction', 'charge_floor_fraction',
+      'terminal_value_fraction', 'safety_stock_days', 'horizon_days']],
     ['Solver', ['time_limit_seconds', 'mip_gap_abs', 'mip_gap']],
   ];
   const byField = Object.fromEntries(d.schema.map((f) => [f.field, f]));
@@ -999,13 +1159,21 @@ async function loadOptParams() {
             onchange: (e) => saveOptParam(field, e.target.value, true),
           },
           Object.entries(choices).map(([opt, label]) => el('option',
-            Object.assign({ value: opt }, v === opt ? { selected: true } : {}),
+            // String(v) so a boolean field matches its 'true'/'false' key; the
+            // word-valued fields compare unchanged.
+            Object.assign({ value: opt }, String(v) === opt ? { selected: true } : {}),
             label)))
         : el('input', {
             class: 'ovr-input' + (needed ? '' : ' set'),
             type: 'number', step: 'any',
             value: v === null || v === undefined ? '' : v,
             placeholder: needed ? 'required' : '',
+            // A focused number input takes the scroll wheel as increment, so
+            // scrolling the page to reach the Run button edits whatever was last
+            // clicked. That turned a typed 0.30 into -36.7 - 37 wheel clicks -
+            // and the run that followed was ruined in a way nothing on screen
+            // showed. Blur instead, so the wheel scrolls the page.
+            onwheel: (e) => e.target.blur(),
             onchange: (e) => saveOptParam(field, e.target.value),
           });
       return el('tr', {},
@@ -1227,6 +1395,8 @@ $('#stream-offset').addEventListener('change', loadStream);
 $('#stream-key-rows').addEventListener('change', loadStream);
 $('#sched-days').addEventListener('change', loadSchedule);
 $('#sched-offset').addEventListener('change', loadSchedule);
+$('#fill-target').addEventListener('change', fillTargetChanged);
+$('#fill-apply').addEventListener('click', applyFill);
 $('#dt-add').addEventListener('click', addDowntime);
 $('#ref-search').addEventListener('input', debounce(loadReferenceRows, 250));
 $('#ref-edited-only').addEventListener('change', loadReferenceRows);
@@ -1259,6 +1429,32 @@ $('#new-scenario').addEventListener('click', async () => {
     }),
   });
   toast(`Scenario "${s.name}" created from current source data`);
+  await boot();
+  $('#scenario-select').value = s.id;
+  await selectScenario(s.id);
+});
+
+/* The header's "New scenario" button starts on the day the reference document
+ * names, which is the workbook's own planning date. Files uploaded today
+ * describe today, so this one asks: a scenario that opens with fresh inventory
+ * on a date five weeks in the past is wrong in a way nothing downstream can
+ * detect. */
+$('#upload-scenario').addEventListener('click', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const name = prompt('Name for the new scenario', `Plan ${today}`);
+  if (!name) return;
+  const asOf = prompt('First day of the plan — the day the uploaded inventory '
+    + 'was taken', today);
+  if (!asOf) return;
+  const s = await api('/api/scenarios', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      as_of: asOf,
+      copy_schedule_from: state.scenario ? state.scenario.id : null,
+    }),
+  });
+  toast(`Scenario "${s.name}" created from the current source data`);
   await boot();
   $('#scenario-select').value = s.id;
   await selectScenario(s.id);

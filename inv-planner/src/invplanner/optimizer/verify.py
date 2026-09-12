@@ -51,7 +51,8 @@ SINK_OUTLETS = frozenset(s["outlet"] for s in cfg.SINKS.values())
 
 
 def verify(ref: Reference, proposed: Scenario, claimed: Dict[str, Any],
-           dates: List[dt.date], spec: Optional[Any] = None) -> Dict[str, Any]:
+           dates: List[dt.date], spec: Optional[Any] = None,
+           downtime: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Compare what the optimizer said against what the schedule actually does.
 
     `spec` is the `ModelSpec` the run was built from. Without it the comparison
@@ -167,6 +168,29 @@ def verify(ref: Reference, proposed: Scenario, claimed: Dict[str, Any],
     # Feed shortfall must be zero: the optimizer holds inventory at or above zero
     # by construction, so any shortfall on replay means the two models disagree
     # about what the schedule consumes.
+    # A unit charging on a day it is down. Checked here as a fact about the
+    # schedule rather than inferred from its consequences: the optimizer never
+    # schedules one, so any charge on an outage day was inherited from the
+    # planner's grid on write-back, and it reached the simulator as a feed
+    # shortfall with no obvious cause. A named failure beats a symptom.
+    #
+    # Zero tolerance: unlike a gallon comparison this is not an arithmetic
+    # disagreement, it is a day the unit cannot run at all.
+    charged_when_down = []
+    for unit, days in (downtime or {}).items():
+        # `downtime_days` hands back dates; a caller reading them off JSON has
+        # strings. Compare on the ISO form so either works.
+        down_iso = {d if isinstance(d, str) else d.isoformat() for d in days}
+        for line_key, series in (proposed.charge_lines or {}).items():
+            if line_key.split("#")[0] != unit:
+                continue
+            for iso, bbl in series.items():
+                if bbl and iso in down_iso:
+                    charged_when_down.append(
+                        {"line": line_key, "date": iso, "bbl": float(bbl),
+                         "unit": unit})
+    respects_downtime = not charged_when_down
+
     executable = actual["feed_shortfall_gal"] <= TOLERANCE_GAL
     # The optimizer claims it routed every overflow itself, so nothing should be
     # left for the simulator to force out.
@@ -174,9 +198,13 @@ def verify(ref: Reference, proposed: Scenario, claimed: Dict[str, Any],
     agrees = all(d["agrees"] for d in diffs.values())
 
     return {
-        "verified": bool(agrees and executable and routed),
+        "verified": bool(agrees and executable and routed
+                         and respects_downtime),
         "executable": executable,
         "fully_routed": routed,
+        "respects_downtime": respects_downtime,
+        "charged_when_down": sorted(charged_when_down,
+                                    key=lambda r: (r["unit"], r["date"]))[:20],
         "scored_in_model_space": model_products is not None,
         "tolerance_gal": TOLERANCE_GAL,
         "claimed": {k: float(claimed.get(k) or 0.0)
@@ -188,7 +216,7 @@ def verify(ref: Reference, proposed: Scenario, claimed: Dict[str, Any],
                            key=lambda r: -r["lost_sales_gal"])[:12],
         "excluded_lost_sales_gal": sum(r["lost_sales_gal"] for r in excluded),
         "note": _explain(diffs, executable, routed, actual, excluded,
-                         model_products is not None),
+                         model_products is not None, charged_when_down),
     }
 
 
@@ -229,7 +257,20 @@ def _repool(sim, blocks: List[Dict[str, Any]], dates: List[dt.date],
 
 def _explain(diffs: Dict[str, Any], executable: bool, routed: bool,
              actual: Dict[str, Any], excluded: List[Dict[str, Any]],
-             model_space: bool) -> str:
+             model_space: bool,
+             charged_when_down: Optional[List[Dict[str, Any]]] = None) -> str:
+    # First, because it is a fact about the schedule rather than about the
+    # comparison: it holds with or without a spec, and charging a unit that is
+    # down usually *causes* the shortfall reported below, so leading with the
+    # symptom sends the reader hunting a missing charge line that is not there.
+    if charged_when_down:
+        units = sorted({r["unit"] for r in charged_when_down})
+        return ("The schedule charges {} on {} day(s) the unit is down ({}). "
+                "The optimizer does not schedule an outage day, so this was "
+                "carried over from the schedule the run started from - see "
+                "`charged_when_down`."
+                .format("/".join(units), len(charged_when_down),
+                        ", ".join(sorted({r["date"] for r in charged_when_down})[:5])))
     if not model_space:
         return ("Scored against raw workbook blocks because no model spec was "
                 "given, so any product the model aggregates or retires will "

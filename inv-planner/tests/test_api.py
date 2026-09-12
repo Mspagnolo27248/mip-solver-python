@@ -25,6 +25,11 @@ def db(tmp_path_factory):
     """A throwaway database seeded exactly the way scripts/init_db.py does."""
     path = tmp_path_factory.mktemp("db") / "test.db"
     os.environ["DATABASE_URL"] = "sqlite:///" + str(path)
+    # An empty upload folder, so these tests read the workbook seed whatever a
+    # planner happens to have uploaded on this machine. Several of them assert
+    # that a scenario frozen from staging matches `scenario.json` exactly, which
+    # only means anything when staging came from that file.
+    os.environ["INVPLANNER_UPLOAD_DIR"] = str(tmp_path_factory.mktemp("uploads"))
     for mod in [m for m in list(sys.modules) if m.startswith("invplanner.db")]:
         del sys.modules[mod]
 
@@ -564,3 +569,327 @@ def test_export_targets_the_column_the_date_really_sits_in(db):
                 "{} sits in column {}, the export would target {}".format(
                     cell.date(), col, exporter.grid_column(cell.date())))
             break
+
+
+def test_a_result_scenario_never_charges_a_unit_that_is_down(db):
+    """The optimizer creates no charge variable on an outage day, so it returns
+    nothing for one - and `_write_result_scenario` copies the base grid before
+    it writes. Without the clear, the planner's own charge survives into the
+    result and the schedule shows a unit running while it is down. It reached
+    the verifier as an unexplained feed shortfall, which is the symptom rather
+    than the cause.
+    """
+    import datetime as dt
+
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    base = svc.create_scenario(db, "downtime write-back", dt.date(2026, 7, 23),
+                               60, "test")
+    line = (db.query(ScheduleEntry)
+            .filter(ScheduleEntry.scenario_id == base.id,
+                    ScheduleEntry.bbl != 0)
+            .order_by(ScheduleEntry.date).first())
+    assert line is not None, "seeded scenario has no charge to inherit"
+    unit = line.line_key.split("#")[0]
+    svc.add_downtime(db, base.id, unit, line.date, line.date, "test outage")
+
+    class _Result:                       # what a solver hands back
+        charge = {}                      # nothing on the outage day, as in life
+        transfer_bbl = {}
+
+    new_id = optsvc._write_result_scenario(db, base, _Result(), "test", 0)
+
+    kept = (db.query(ScheduleEntry)
+            .filter(ScheduleEntry.scenario_id == new_id,
+                    ScheduleEntry.line_key == line.line_key,
+                    ScheduleEntry.date == line.date).one())
+    assert kept.bbl == 0.0, (
+        "{} charge on {} survived into the result".format(
+            line.line_key, line.date))
+
+    # And the verifier names it rather than leaving it to surface downstream as
+    # an unexplained feed shortfall. Checked against the *base* scenario, which
+    # still carries the charge the result no longer does - so this asserts the
+    # check works, not merely that the fix removed its input.
+    from invplanner.optimizer import verify
+
+    down = svc.downtime_days(db, base.id)
+    assert down.get(unit), "downtime did not register"
+    ref = svc.engine_reference(db, base.reference_version_id)
+    dates = [svc._d(x) for x in base.inputs["dates"]][:30]
+    claimed = {"lost_sales_gal": 0.0, "downgrade_gal": 0.0}
+
+    blind = verify.verify(ref, svc.engine_scenario(db, base), claimed, dates)
+    assert blind["respects_downtime"], "no downtime passed, nothing to report"
+
+    seen = verify.verify(ref, svc.engine_scenario(db, base), claimed, dates,
+                         downtime=down)
+    assert not seen["respects_downtime"]
+    assert not seen["verified"]
+    assert any(r["line"] == line.line_key for r in seen["charged_when_down"])
+    assert "the unit is down" in seen["note"]
+
+
+# ----------------------------------------------------------- schedule fill
+def _fill_scenario(db, name):
+    """A scenario of its own, so a bulk edit cannot disturb its neighbours."""
+    from invplanner.db import service as svc
+    from invplanner import model_config as cfg
+
+    import json
+    with open(os.path.join(SEED, "scenario.json"), encoding="utf-8") as f:
+        as_of = json.load(f)["meta"]["as_of"]
+    scenario = svc.create_scenario(db, name, svc._d(as_of), horizon_days=40,
+                                   actor="test")
+    ref = svc.engine_reference(db, scenario.reference_version_id)
+    live = {l["key"] for l in cfg.live_charge_lines(ref.charge_lines)}
+    dates = [svc._d(x) for x in scenario.inputs["dates"]]
+    return scenario, live, dates
+
+
+def _set_cell(db, scenario_id, line_key, day, bbl):
+    """Set one cell, whether or not a row is already there."""
+    from invplanner.db.models import ScheduleEntry
+    row = (db.query(ScheduleEntry)
+           .filter(ScheduleEntry.scenario_id == scenario_id,
+                   ScheduleEntry.line_key == line_key,
+                   ScheduleEntry.date == day).first())
+    if row is None:
+        row = ScheduleEntry(scenario_id=scenario_id, line_key=line_key,
+                            date=day, bbl=0.0)
+        db.add(row)
+    row.bbl = bbl
+    db.commit()
+
+
+def test_filling_a_rate_writes_the_window_and_clears_the_siblings(db):
+    """The cold-start setup: one rate across every day, one line at a time.
+
+    The sibling clear is the part that is easy to leave out and expensive to
+    leave out. A unit runs one feed at a time, so a fill that writes only its own
+    line leaves whatever was already scheduled on the others and doubles the
+    unit's charge on those days - a schedule the plant cannot run, handed to the
+    optimizer as though a planner meant it.
+    """
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    scenario, live, dates = _fill_scenario(db, "fill-rate")
+    rose = sorted(k for k in live if k.startswith("ROSE#"))
+    assert len(rose) > 1, "this test needs a unit with more than one line"
+    target, sibling = rose[0], rose[1]
+    down = svc.downtime_days(db, scenario.id).get("ROSE", set())
+    window = [d for d in dates[:20] if d not in down]
+    assert len(window) > 5
+
+    svc.fill_schedule(db, scenario.id, "ROSE", 0.0, live_keys=live, actor="test")
+    _set_cell(db, scenario.id, sibling, window[5], 1234.0)
+
+    r = svc.fill_schedule(db, scenario.id, target, 3000.0,
+                          start=window[0], end=window[-1], live_keys=live,
+                          actor="test")
+
+    got = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id,
+        ScheduleEntry.line_key == target)}
+    for d in window:
+        assert got.get(d) == 3000.0, "no rate written on {}".format(d)
+    assert not got.get(dates[-1]), "wrote past the end date"
+
+    sib = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id,
+        ScheduleEntry.line_key == sibling)}
+    assert sib.get(window[5]) == 0.0
+    assert r["siblings_cleared"] == 1
+
+
+def test_filling_a_whole_unit_with_a_rate_is_refused(db):
+    """Most units carry several lines. Writing one rate onto all of them runs
+    every line at once, which is not what anyone means by "run MEK at 3,000"."""
+    import pytest
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    scenario, live, dates = _fill_scenario(db, "fill-unit")
+    window = set(dates)
+    with pytest.raises(ValueError) as e:
+        svc.fill_schedule(db, scenario.id, "MEK", 3000.0, live_keys=live,
+                          actor="test")
+    assert "single line" in str(e.value)
+
+    # Clearing it is the operation that does make sense, and handing the
+    # optimizer an empty schedule to decide for is the whole of a cold start.
+    svc.fill_schedule(db, scenario.id, "MEK", 0.0, live_keys=live, actor="test")
+    left = [e.line_key for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id)
+        if e.bbl and e.date in window and e.line_key.startswith("MEK#")]
+    assert left == []
+
+
+def test_a_fill_does_not_write_into_planned_downtime(db):
+    """The optimizer creates no variable on an outage day, so a charge typed
+    there is invisible to the solve and survives into the result. The referee
+    catches that now; there is no reason to keep making it upstream."""
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    scenario, live, dates = _fill_scenario(db, "fill-downtime")
+    line = sorted(k for k in live if k.startswith("ROSE#"))[0]
+    window = dates[:10]
+    svc.add_downtime(db, scenario.id, "ROSE", window[2], window[4],
+                     "test outage", "test")
+    outage = svc.downtime_days(db, scenario.id).get("ROSE", set())
+    expected = sum(1 for d in window if d in outage)
+    assert expected >= 3
+
+    svc.fill_schedule(db, scenario.id, "ROSE", 0.0, live_keys=live, actor="test")
+    r = svc.fill_schedule(db, scenario.id, line, 2500.0, start=window[0],
+                          end=window[-1], live_keys=live, actor="test")
+    assert r["skipped_downtime"] == expected
+
+    got = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id,
+        ScheduleEntry.line_key == line)}
+    for d in window:
+        if d in outage:
+            assert not got.get(d), "{} charged while ROSE is down".format(d)
+        else:
+            assert got.get(d) == 2500.0
+
+
+def test_filling_crude_sets_the_rate_and_the_mode(db):
+    from invplanner.db import service as svc
+    from invplanner.db.models import CrudeDay
+
+    scenario, _, dates = _fill_scenario(db, "fill-crude")
+    window = dates[:15]
+    r = svc.fill_schedule(db, scenario.id, "CRUDE", 9500.0, start=window[0],
+                          end=window[-1], mode="R", actor="test")
+    assert r["cells"] == len(window)
+
+    got = {c.date: c for c in db.query(CrudeDay).filter(
+        CrudeDay.scenario_id == scenario.id)}
+    for d in window:
+        assert got[d].bbl == 9500.0
+        assert got[d].mode == "R"
+
+
+def test_only_empty_days_leaves_what_is_already_scheduled(db):
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    scenario, live, dates = _fill_scenario(db, "fill-empty-only")
+    line = sorted(k for k in live if k.startswith("PLATFORMER#"))[0]
+    down = svc.downtime_days(db, scenario.id).get("PLATFORMER", set())
+    window = [d for d in dates[20:32] if d not in down]
+    assert len(window) > 4
+
+    svc.fill_schedule(db, scenario.id, "PLATFORMER", 0.0, live_keys=live,
+                      actor="test")
+    _set_cell(db, scenario.id, line, window[3], 777.0)
+
+    svc.fill_schedule(db, scenario.id, line, 4000.0, start=window[0],
+                      end=window[-1], overwrite=False, live_keys=live,
+                      actor="test")
+    got = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id,
+        ScheduleEntry.line_key == line)}
+    assert got[window[3]] == 777.0, "overwrote a day that was already scheduled"
+    assert got[window[0]] == 4000.0
+
+
+def test_the_fill_endpoint_rejects_a_retired_line(db):
+    """The same guard the cell edit has. A bookmarked grid can still name a line
+    the reference has since retired, and a fill would write hundreds of cells the
+    optimizer then drops without saying so."""
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db.session import get_session
+
+    scenario, _, _ = _fill_scenario(db, "fill-retired")
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    r = client.post("/api/scenarios/{}/schedule/fill".format(scenario.id),
+                    json={"target": "MEK#70", "bbl": 1000.0})
+    assert r.status_code == 400
+    assert "retired" in r.json()["detail"]
+
+
+def test_backfilling_gaps_leaves_the_schedule_it_fills_around(db):
+    """`overwrite=False` plus the sibling clear is the rolling-plan case.
+
+    A copied schedule runs out before the window does, and the fix is to write a
+    rate onto the days that have none. If the sibling clear followed the date
+    *range* rather than the days actually written, that backfill would delete
+    every other line of the unit on the days the copy did cover - emptying the
+    schedule it was called to complete.
+    """
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    scenario, live, dates = _fill_scenario(db, "fill-backfill")
+    hydro = sorted(k for k in live if k.startswith("HYDRO#"))
+    assert len(hydro) > 2
+    target, other = hydro[0], hydro[1]
+    down = svc.downtime_days(db, scenario.id).get("HYDRO", set())
+    window = [d for d in dates[:16] if d not in down]
+    assert len(window) > 6
+
+    svc.fill_schedule(db, scenario.id, "HYDRO", 0.0, live_keys=live, actor="test")
+    # A covered stretch on one line, then nothing - the shape a copied schedule
+    # has once the plan has rolled past the end of the source data.
+    covered = window[:3]
+    for d in covered:
+        _set_cell(db, scenario.id, other, d, 4500.0)
+
+    r = svc.fill_schedule(db, scenario.id, target, 2000.0, start=window[0],
+                          end=window[-1], overwrite=False, live_keys=live,
+                          actor="test")
+
+    kept = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id,
+        ScheduleEntry.line_key == other)}
+    for d in covered:
+        assert kept.get(d) == 4500.0, \
+            "{} was cleared on a day the backfill skipped".format(other)
+    assert r["siblings_cleared"] == 0
+
+    got = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id,
+        ScheduleEntry.line_key == target)}
+    for d in window[3:]:
+        assert got.get(d) == 2000.0, "gap not filled on {}".format(d)
+    # The covered days are days the unit is already running, so they are not
+    # gaps - "empty" is a property of the unit, not of one of its lines.
+    for d in covered:
+        assert not got.get(d), "wrote into a day the unit was already running"
+
+
+def test_overwriting_still_clears_the_siblings_on_every_day_written(db):
+    """The guard above must not have turned the sibling clear off. A plain fill
+    still owns the whole range: a unit runs one feed at a time."""
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    scenario, live, dates = _fill_scenario(db, "fill-overwrite-siblings")
+    hydro = sorted(k for k in live if k.startswith("HYDRO#"))
+    target, other = hydro[0], hydro[1]
+    down = svc.downtime_days(db, scenario.id).get("HYDRO", set())
+    window = [d for d in dates[:16] if d not in down]
+
+    svc.fill_schedule(db, scenario.id, "HYDRO", 0.0, live_keys=live, actor="test")
+    for d in window[:3]:
+        _set_cell(db, scenario.id, other, d, 4500.0)
+
+    r = svc.fill_schedule(db, scenario.id, target, 2000.0, start=window[0],
+                          end=window[-1], live_keys=live, actor="test")
+    assert r["siblings_cleared"] == 3
+
+    kept = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+        ScheduleEntry.scenario_id == scenario.id,
+        ScheduleEntry.line_key == other)}
+    for d in window[:3]:
+        assert not kept.get(d)

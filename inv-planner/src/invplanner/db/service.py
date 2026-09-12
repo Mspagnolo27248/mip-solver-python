@@ -319,6 +319,199 @@ def _copy_downtime(db: Session, src_id: int, dst_id: int) -> None:
                                created_by=d.created_by))
 
 
+# ------------------------------------------------------- charge schedule fill
+def fill_schedule(db: Session, scenario_id: int, target: str,
+                  bbl: float, start: Optional[dt.date] = None,
+                  end: Optional[dt.date] = None, mode: Optional[str] = None,
+                  skip_downtime: bool = True, overwrite: bool = True,
+                  exclusive: bool = True, live_keys: Optional[set] = None,
+                  actor: str = "planner") -> Dict[str, Any]:
+    """Write one rate across a stretch of days.
+
+    A cold start is set up by hand today: the planner types a rate into every
+    cell of the crude, ROSE and Platformer rows and deletes every cell of the
+    units the optimizer decides for. Over a 100-day window that is several
+    hundred keystrokes per row, and the schedule the optimizer is handed is only
+    as good as the last cell that got typed.
+
+    `target` is one of:
+
+      ``CRUDE``       the crude charge row, and its mode if one is given
+      ``ROSE#97``     one charge line
+      ``MEK``         every live line on that unit - **clearing only**
+
+    Filling a whole unit with a *rate* is refused rather than obeyed. Most units
+    carry several lines, and writing the same rate onto all of them does not run
+    the unit at that rate: it runs every line at once, which is not a schedule
+    the plant can execute and not what anyone meant to ask for. Clearing a whole
+    unit is the operation that does make sense, and is the one a cold start
+    needs.
+
+    `exclusive` is the other half of that guard. A unit runs one feed at a time,
+    so filling a line at a rate clears its siblings on the same days; without it
+    a planner setting ROSE#97 over a window where ROSE#98 was already scheduled
+    silently doubles the unit's charge.
+
+    Days a unit is down are skipped, not written. The optimizer creates no
+    variable on an outage day, so a charge typed there survives into results
+    unnoticed - which is the defect the referee's downtime check now catches, and
+    there is no reason to keep making it upstream of the referee.
+    """
+    scenario = db.query(Scenario).get(scenario_id)
+    if scenario is None:
+        raise KeyError("no scenario {}".format(scenario_id))
+
+    days = [_d(x) for x in scenario.inputs["dates"]]
+    if start is not None:
+        days = [d for d in days if d >= start]
+    if end is not None:
+        days = [d for d in days if d <= end]
+    if not days:
+        raise ValueError("that date range does not overlap the scenario window "
+                         "({} to {})".format(scenario.inputs["dates"][0],
+                                             scenario.inputs["dates"][-1]))
+
+    bbl = float(bbl or 0.0)
+    if bbl < 0:
+        raise ValueError("a charge cannot be negative")
+
+    # ------------------------------------------------------------- crude row
+    if target.upper() == "CRUDE":
+        existing = {c.date: c for c in db.query(CrudeDay).filter(
+            CrudeDay.scenario_id == scenario_id)}
+        written = 0
+        for d in days:
+            row = existing.get(d)
+            if row is None:
+                if not bbl and mode is None:
+                    continue                    # nothing there to clear
+                db.add(CrudeDay(scenario_id=scenario_id, date=d, bbl=bbl,
+                                mode=mode))
+            else:
+                if not overwrite and row.bbl:
+                    continue
+                row.bbl = bbl
+                if mode is not None:
+                    row.mode = mode
+            written += 1
+        return _fill_done(db, scenario, actor, target, bbl, days, written, 0)
+
+    # -------------------------------------------------------- lines and units
+    if "#" in target:
+        keys = [target]
+        unit = target.split("#")[0]
+    else:
+        unit = target
+        if live_keys is None:
+            raise ValueError("filling a whole unit needs the list of live lines")
+        keys = sorted(k for k in live_keys if k.split("#")[0] == unit)
+        if not keys:
+            raise ValueError("{} has no charge lines".format(unit))
+        if bbl:
+            raise ValueError(
+                "{} has {} charge lines, and writing {:,.0f} bbl onto all of "
+                "them would run every one of them at once. Name a single line "
+                "to set a rate, or set the rate to 0 to clear the unit."
+                .format(unit, len(keys), bbl))
+    if live_keys is not None:
+        dead = [k for k in keys if k not in live_keys]
+        if dead:
+            raise ValueError("{} is retired and is not scheduled"
+                             .format(", ".join(dead)))
+
+    # Only a *rate* is kept out of an outage. Clearing one is the opposite of
+    # the mistake this guard exists for: a charge already sitting on a day the
+    # unit is down is invisible to the optimizer and survives into the result,
+    # so a clear that skipped those days would leave behind exactly the cells
+    # worth removing.
+    down = (downtime_days(db, scenario_id).get(unit, set())
+            if skip_downtime and bbl else set())
+    targets = [d for d in days if d not in down]
+    skipped = len(days) - len(targets)
+
+    # The siblings this fill has to clear, so one unit does not end up charging
+    # two feeds on the same day.
+    family = sorted(k for k in (live_keys or ())
+                    if k.split("#")[0] == unit) or list(keys)
+    siblings: List[str] = []
+    if exclusive and bbl:
+        siblings = [k for k in family if k not in keys]
+
+    entries = {}
+    for e in db.query(ScheduleEntry).filter(
+            ScheduleEntry.scenario_id == scenario_id,
+            ScheduleEntry.line_key.in_(family)):
+        entries[(e.line_key, e.date)] = e
+
+    # "Only days that are empty" has to mean the *unit* is idle that day, not
+    # that this one line is. A unit runs one feed at a time, so a day where
+    # another line is scheduled is a day this line is deliberately not running -
+    # and writing into it would clear that line and destroy the schedule the
+    # backfill was called to complete. This is the rolling case: a copied
+    # schedule covers the near term and runs out, and filling the tail must not
+    # touch the head.
+    if not overwrite and bbl:
+        occupied = {d for (k, d), e in entries.items() if e.bbl and k in family}
+        targets = [d for d in targets if d not in occupied]
+
+    written = 0
+    #: Days the target line ends up carrying the rate - not the days this call
+    #: changed. The siblings are cleared against *this*, so `overwrite=False`
+    #: cannot clear a sibling on a day it declined to write: backfilling the gaps
+    #: in a copied schedule would otherwise delete the schedule it was filling
+    #: around, which is the opposite of what asking for empty days only means.
+    set_days = set()
+    for key in keys:
+        for d in targets:
+            row = entries.get((key, d))
+            if row is None:
+                if not bbl:
+                    continue                    # already empty
+                db.add(ScheduleEntry(scenario_id=scenario_id, line_key=key,
+                                     date=d, bbl=bbl))
+            elif not overwrite and row.bbl:
+                continue                        # left as the planner had it
+            elif row.bbl == bbl:
+                set_days.add(d)                 # already at the rate
+                continue
+            else:
+                row.bbl = bbl
+            set_days.add(d)
+            written += 1
+
+    cleared = 0
+    for key in siblings:
+        for d in set_days:
+            row = entries.get((key, d))
+            if row is not None and row.bbl:
+                row.bbl = 0.0
+                cleared += 1
+
+    return _fill_done(db, scenario, actor, target, bbl, days, written, skipped,
+                      cleared=cleared, siblings=siblings)
+
+
+def _fill_done(db: Session, scenario: Scenario, actor: str, target: str,
+               bbl: float, days: List[dt.date], written: int, skipped: int,
+               cleared: int = 0, siblings: Optional[List[str]] = None
+               ) -> Dict[str, Any]:
+    scenario.schedule_version += 1
+    db.add(AuditEvent(actor=actor, action="schedule.fill",
+                      target=str(scenario.id),
+                      detail={"target": target, "bbl": bbl,
+                              "start": days[0].isoformat(),
+                              "end": days[-1].isoformat(),
+                              "cells": written, "skipped_downtime": skipped,
+                              "siblings_cleared": cleared}))
+    db.commit()
+    invalidate(scenario.id)
+    return {"ok": True, "target": target, "bbl": bbl,
+            "start": days[0].isoformat(), "end": days[-1].isoformat(),
+            "days": len(days), "cells": written, "skipped_downtime": skipped,
+            "siblings_cleared": cleared, "siblings": siblings or [],
+            "schedule_version": scenario.schedule_version}
+
+
 # ------------------------------------------------------------ planned downtime
 def list_downtime(db: Session, scenario_id: int) -> List[Dict[str, Any]]:
     rows = (db.query(PlannedDowntime)

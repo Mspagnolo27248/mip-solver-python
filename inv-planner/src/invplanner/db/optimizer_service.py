@@ -30,7 +30,7 @@ FIELDS = ["crude_price_per_bbl", "downgrade_discount_per_gal",
           "lost_sale_margin_per_gal", "netback_diesel_per_gal",
           "netback_gasoline_per_gal", "switch_cost", "switch_cost_by_unit",
           "objective", "terminal_value_fraction", "safety_stock_days",
-          "charge_floor_fraction",
+          "charge_floor_fraction", "must_run", "min_rate_fraction",
           "terminal_shortfall_per_gal", "model_version", "horizon_days",
           "time_limit_seconds", "mip_gap", "mip_gap_abs"]
 
@@ -98,6 +98,27 @@ LABELS = {
                               "everywhere, and raising it changes almost "
                               "nothing: at 100 days 0.30 and 0.50 lose the same "
                               "gallons."),
+    "must_run": (
+        "Units may idle", "on = must run daily",
+        "On, a unit the model decides for has to be running every day it is not "
+        "in a turnaround - which is what the plant does, and what stops the "
+        "optimizer fixing an inventory problem by switching things off. Turn it "
+        "off for a **cold start**: handed an empty MEK and extraction schedule "
+        "the model has to let extraction stand while MEK builds its feeds, and "
+        "with this on that solve is infeasible. Turn it back on before trusting "
+        "the campaign shape."),
+    "min_rate_fraction": (
+        "Minimum rate", "fraction of the line's rate",
+        "The least a unit the model decides for may charge on a day it runs. "
+        "**Not the charge floor above** - that one is a fraction of your own "
+        "schedule and applies to the units you fixed; this is a fraction of the "
+        "line's maximum rate and applies only to the freed ones. 0.60 sits just "
+        "under the lowest rate the plant has held mid-campaign (0.64, median "
+        "0.77), and it is what stops the model allocating a day and charging "
+        "nothing through it. It is also what makes a cold start infeasible: "
+        "extraction's stocked feeds last about three days at 60%, and 9305 "
+        "cannot be built ahead in time. 0.30 solves it, at the cost of a "
+        "schedule that runs softer than the plant ever has."),
     "terminal_shortfall_per_gal": (
         "End-of-window shortfall", "$/gal",
         "What ending below opening inventory costs. Material to replace, not "
@@ -135,6 +156,28 @@ LABELS = {
 }
 
 
+#: Fields stored as booleans. They cannot go through the numeric coercion in
+#: `update_params`: `type(False or 0.0)` is float, and a select posts the string
+#: "false", which is truthy.
+BOOL_FIELDS = {"must_run"}
+
+
+#: Inclusive bounds for fields where a value outside them is not a preference but
+#: a mistake. A fraction of -36.7 reached the solver as `chg >= negative`, which
+#: is never binding - so the minimum-rate constraint was silently removed rather
+#: than loosened, and the run came back with units nominally running and empty.
+#: Nothing downstream could tell that from a deliberate setting.
+RANGES = {
+    "min_rate_fraction": (0.0, 1.0),
+    "charge_floor_fraction": (0.0, 1.0),
+    "terminal_value_fraction": (0.0, 1.0),
+    "mip_gap": (0.0, 1.0),
+    "safety_stock_days": (0.0, 60.0),
+    "horizon_days": (1, 366),
+    "time_limit_seconds": (1, 86400),
+}
+
+
 def params_dict(row: OptimizerParams) -> Dict[str, Any]:
     out = {f: getattr(row, f) for f in FIELDS}
     out["id"] = row.id
@@ -155,6 +198,19 @@ def update_params(db: Session, values: Dict[str, Any],
     for f in FIELDS:
         if f in values:
             v = values[f]
+            if f in BOOL_FIELDS:
+                setattr(row, f, v if isinstance(v, bool)
+                        else str(v).strip().lower() in ("1", "true", "yes", "on"))
+                continue
+            if f in RANGES and v is not None:
+                lo, hi = RANGES[f]
+                try:
+                    n = float(v)
+                except (TypeError, ValueError):
+                    raise ValueError("{} must be a number, got {!r}".format(f, v))
+                if not lo <= n <= hi:
+                    raise ValueError(
+                        "{} must be between {} and {}, got {}".format(f, lo, hi, n))
             setattr(row, f, None if v is None else type(getattr(row, f, 0.0) or 0.0)(v)
                     if isinstance(v, (int, float)) else v)
     db.add(AuditEvent(actor=actor, action="optimizer.params",
@@ -225,7 +281,7 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner"
             # same physics and is the referee.
             proposed = db.query(Scenario).get(new_id)
             check = verify.verify(ref, svc.engine_scenario(db, proposed),
-                                  result.kpis, dates, spec)
+                                  result.kpis, dates, spec, downtime=downtime)
             run_row.kpis = {"baseline": baseline, "optimized": result.kpis,
                             "verification": check, "proved_optimal": proved}
             if not check["verified"]:
@@ -300,6 +356,24 @@ def _write_result_scenario(db: Session, base: Scenario, result, actor: str,
                                              date=svc._d(s), bbl=bbl))
                 else:
                     entry.bbl = bbl
+    # Outage days carry no charge variable, so the optimizer returns nothing for
+    # them and the copy above leaves the planner's own charge standing. The
+    # result then shows a unit charging on a day it is down - material the
+    # optimizer never counted, which the verifier meets later as a feed shortfall
+    # it cannot explain. Nothing may be produced on an outage day, so an
+    # inherited value is never right.
+    #
+    # Zeroed rather than deleted: `engine_scenario` skips a zero, so it is inert
+    # to the engine, and the grid keeps its shape on the planning side where a
+    # missing cell and a zero read differently.
+    down = svc.downtime_days(db, scenario.id)
+    cleared = 0
+    for e in db.query(ScheduleEntry).filter(
+            ScheduleEntry.scenario_id == scenario.id):
+        if e.bbl and e.date in down.get(e.line_key.split("#")[0], ()):
+            e.bbl = 0.0
+            cleared += 1
+
     scenario.status = "proposed"
     scenario.schedule_version += 1
     db.commit()

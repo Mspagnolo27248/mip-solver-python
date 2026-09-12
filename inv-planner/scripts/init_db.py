@@ -37,8 +37,12 @@ def main() -> int:
             ref.id, len(ref.payload.get("blocks", [])),
             len(ref.payload.get("products", {}))))
 
+        # The source is printed because it is not always the workbook: a feed
+        # with an uploaded sheet in data/uploads keeps reading that sheet, and
+        # re-importing the workbook does not quietly take it back.
         for batch in svc.sync_all(db, actor="init"):
-            print("  synced {:<24s} {:>6,} rows".format(batch.feed, batch.row_count))
+            print("  synced {:<24s} {:>6,} rows  from {}".format(
+                batch.feed, batch.row_count, batch.source))
 
         if db.query(Scenario).count() == 0:
             s = svc.create_scenario(db, "Baseline (from workbook)",

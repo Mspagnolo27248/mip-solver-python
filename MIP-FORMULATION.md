@@ -1,6 +1,7 @@
 # Optimization model: what the data says the formulation has to be
 
-Companion to `WEBAPP-MIP-PLAN.md`, which was written before the engine existed and
+Companion to `docs/archive/WEBAPP-MIP-PLAN.md`, which was written before the engine
+existed and
 reasoned from the domain rather than from measurements. Now that the simulator is
 validated and the real schedule is loaded, the problem can be measured.
 
@@ -351,6 +352,15 @@ changeover day is *a partial day at full rate*, not a full day at low rate:
 |---|---:|---:|
 | 9704 Kendex 0150 UNHT | 0.57–1.49 of planning | **5,200 bbl/day** |
 | 9713 Diesel hydro charge | — | **5,000 bbl/day** |
+
+> **Superseded as a ceiling.** Operations have since confirmed the hydrotreater
+> tops out at **5,000 bbl/day for the unit**, whatever mix it runs, so every
+> HYDRO line in `MAX_RATE_BBL_PER_DAY` now sits at or below 5,000 — 9704
+> included. The 5,200 above remains a true *observation*; it is no longer a
+> ceiling. Which is this section's own argument turned on the table that
+> illustrates it: a clean day is evidence of what was typed into the plan, not of
+> what the unit can take. The plan's single 8,500 bbl/day HYDRO entry — a crude
+> unit figure on a hydrotreater row — is the proof that those two differ.
 
 Behind that sits a structural problem: **the hydrotreater's campaigns are median 1
 day, so four of its seven charges never run a single undisturbed day in the entire
@@ -767,6 +777,13 @@ nonsense.
 ---
 
 ## 9. Build order
+
+> **The build did not follow this table, and the table is the stale half.** As
+> built: **v1** frees MEK *and* EXTRACT together, and **v2** adds HYDRO in two
+> stages. The crude R/L mode is a decision in the configuration
+> (`CRUDE_MODE_IS_DECISION`) rather than a numbered step of its own, and ROSE and
+> the Platformer cascade are still pinned. `SCHEDULING-MODEL.md` specifies what
+> v1 and v2 actually are; the acceptance criteria below still stand.
 
 Each step is scored by replaying the result through the simulator in physical
 mode, so "better" is measured against lost sales, downgrade volume and changeover

@@ -143,6 +143,22 @@ class OptimizeResult:
         self.kpis: Dict[str, Any] = {}
 
 
+def _min_rate_fraction(unit: str, product: str,
+                       override: Optional[float]) -> float:
+    """The minimum-rate fraction for one line, with the parameter as default.
+
+    A figure recorded against this specific line still wins: those are measured
+    from the plant and the parameter is a horizon-wide dial, so letting the dial
+    override a measurement would quietly discard evidence. Everything else takes
+    the parameter, and `None` leaves the configured default in place.
+    """
+    per_line = cfg.MIN_RATE_FRACTION.get(unit, {}).get(product)
+    if per_line is not None:
+        return float(per_line)
+    return (cfg.DEFAULT_MIN_RATE_FRACTION if override is None
+            else float(override))
+
+
 def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
           horizon: Optional[List[dt.date]] = None,
           downtime: Optional[Dict[str, set]] = None,
@@ -181,12 +197,15 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # confident schedule built on demand nobody stands behind, or an
     # infeasibility whose cause is three layers from the error.
     asked = len(dates)
-    dates = cfg.clamp_horizon(dates)
+    #: Read off the planner's own grid rather than a date in the config, so a
+    #: plan extended by a month is solvable the day it is extended.
+    believable = cfg.valid_through(scn)
+    dates = cfg.clamp_horizon(dates, scn)
     if not dates:
         res.status = "no_solution"
         res.message = ("the whole horizon falls past {}, the last day the "
-                       "workbook's inputs can be believed"
-                       .format(cfg.DATA_VALID_THROUGH))
+                       "planner has filled in a charge and so the last day the "
+                       "inputs can be believed".format(believable))
         return res
     truncated = asked - len(dates)
     #: Units whose charges are held exactly at the schedule handed in, so a
@@ -237,6 +256,18 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
     # is the cleanest way to separate "is the routing right?" from "is the
     # charge optimisation right?".
     floor = float(params.get("charge_floor_fraction", 1.0))
+    # Must-run is a parameter rather than only a config constant because a cold
+    # start needs it off: with an empty MEK and extraction schedule the model has
+    # to be allowed to stand extraction down while MEK builds its feeds. Absent
+    # from `params` it falls back to the configured default, so callers that
+    # never heard of it - the baseline cases among them - are unchanged.
+    _mr = params.get("must_run")
+    must_run = cfg.MUST_RUN_WHEN_AVAILABLE if _mr is None else bool(_mr)
+    # The least a freed line may charge when it runs, as a fraction of its rate.
+    # Distinct from `floor` above: that one is a fraction of the planner's own
+    # schedule and applies to fixed lines only. Absent, the configured default
+    # stands, so callers that predate the parameter are unchanged.
+    min_rate_frac = params.get("min_rate_fraction")
     # What ending the window short costs, per gallon. Defaults to the downgrade
     # discount, because that is the economics it shares: ending short is material
     # you have to replace, not margin you have lost. Pricing it against the
@@ -684,8 +715,8 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         visit_reactors[unit] = [r for r in on_unit
                                 if len(on_unit) > 1
                                 and cfg.min_reactor_visit_days(unit, r) > 1]
-        minrate = {l["key"]: rate[l["key"]] * cfg.min_rate_fraction(
-            unit, l["workbook_product"]) for l in ulines}
+        minrate = {l["key"]: rate[l["key"]] * _min_rate_fraction(
+            unit, l["workbook_product"], min_rate_frac) for l in ulines}
         feed = {l["key"]: l["workbook_product"] for l in ulines}
         loss = {(a, b): cfg.changeover_loss_days(unit, feed[a], feed[b])
                 for a, b in arcs}
@@ -826,7 +857,7 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
             d = dates[i]
             if d in down.get(unit, set()):
                 pass          # no charge variables exist on an outage day
-            elif cfg.MUST_RUN_WHEN_AVAILABLE:
+            elif must_run:
                 # Idling is not a free choice. Note this binds *time*: a unit
                 # notionally on and charging nothing is exactly the non-answer
                 # must-run exists to forbid, so the day has to be fully allocated
@@ -1322,7 +1353,7 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         three minutes to nearly four hours, because a cost-minimising objective
         with no revenue for *serving* demand cannot have revenue for dumping it.
         Half a margin objective is worse than none. The real fix is the whole one
-        - see MARGIN-OBJECTIVE.md - where every gallon earns exactly once,
+        - see docs/archive/MARGIN-OBJECTIVE.md - where every gallon earns exactly once,
         wherever it ends up, and this function disappears.
         """
         landed = sink_value.get(sink)
@@ -1656,8 +1687,9 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
         return res
     if truncated:
         res.message = ("horizon cut by {} day(s) to end {}, the last day the "
-                       "workbook's inputs can be believed; solving {} days. "
-                       .format(truncated, cfg.DATA_VALID_THROUGH, len(dates)))
+                       "planner has filled in a charge; solving {} days. "
+                       "Extend the schedule past that day to plan further. "
+                       .format(truncated, believable, len(dates)))
     if res.status == "feasible":
         res.message += ("stopped after {:.0f}s with a usable schedule that is "
                        "NOT proved optimal - the gap is unknown, and a longer "
@@ -1711,7 +1743,8 @@ def solve(ref: Reference, scn: Scenario, spec, params: Dict[str, Any],
                                       for v in term_short.values()),
         "charge_floor_fraction": floor,
         "days": len(dates),
-        #: Days cut off the end because they fall past `DATA_VALID_THROUGH`.
+        #: Days cut off the end because they fall past the last day the planner has
+        #: filled in a charge - see `cfg.schedule_valid_through`.
         #: Non-zero means the answer covers less than was asked for, which a
         #: report must say rather than quietly show a shorter plan.
         "horizon_truncated_days": truncated,

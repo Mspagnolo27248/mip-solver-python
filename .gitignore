@@ -9,3 +9,12 @@ __pycache__/
 # as a scenario in the database and exported on demand, so these are copies.
 v2 user test *.xlsx
 v2 user test *.csv
+
+# Half-written uploads, deleted as soon as they parse (or fail to)
+inv-planner/data/uploads/incoming/
+
+# Rebuilt from data/seed by scripts/init_db.py - not source
+inv-planner/data/invplanner.db
+
+# Workbook history, kept on disk rather than in git (38 MB)
+Planning File Versions/

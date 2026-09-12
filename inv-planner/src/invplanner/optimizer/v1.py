@@ -1,7 +1,7 @@
 """v1: the dewaxing and extraction units schedule themselves.
 
 The second step of the build order in `MIP-FORMULATION.md`, specified in full in
-`V1-MODEL.md`. v0 took the planner's choice of *what* each unit charges as given
+`SCHEDULING-MODEL.md`. v0 took the planner's choice of *what* each unit charges as given
 and optimised only how much, and where the overflow went. v1 frees that choice on
 the two units whose transition structure is known, and is therefore the first
 model in the series with any binary variables at all.
