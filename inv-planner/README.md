@@ -101,6 +101,89 @@ product codes — edit them there if a product belongs somewhere else. Anything 
 assigned shows up under "Other" rather than disappearing, and a test enforces that
 every product appears in exactly one group.
 
+### Running the greedy scheduler
+
+`greedy` builds a schedule by rule instead of by solver. It decides the same
+units v2 does plus ROSE, returns in well under a second where v2 takes about a
+minute over 42 days, and **cannot tell you how far from best it is** - there is no
+optimality gap, because there is no search. Judge it by the verification, not by
+an objective. Full reasoning and the bake-off table are in
+`src/invplanner/optimizer/greedy.py`.
+
+**From the app**
+
+1. **Optimizer inputs** -> *Model* -> **`greedy — rules, no solver (under a
+   second)`**. Everything else on that screen still applies; `time_limit_seconds`,
+   `mip_gap` and `mip_gap_abs` are simply ignored, since nothing is being solved.
+2. Set **Detailed horizon** to **42 days**. That is the horizon this is verified
+   at - see the limits below before going longer.
+3. **Runs & results** -> **Run optimizer**, picking the scenario to plan from.
+4. The run lands as `verified · not proved optimal`, which is the normal good
+   outcome and not a warning: `greedy` can never be `done`, because `done` means a
+   proof. **A run marked `unverified` should not be used** - the simulator replayed
+   the schedule and disagreed with it.
+5. The result opens on the planning side as a new scenario, exactly like a MIP run.
+
+**From the command line**, which is also what the app does underneath:
+
+```bash
+# start the app
+python scripts/run_api.py --port 8000
+
+# point the optimizer at greedy, 42 days
+curl -X PATCH http://127.0.0.1:8000/api/optimizer/params      -H "Content-Type: application/json"      -d '{"model_version":"greedy","horizon_days":42}'
+
+# run it against scenario 48
+curl -X POST http://127.0.0.1:8000/api/optimizer/run      -H "Content-Type: application/json"      -d '{"scenario_id":48,"actor":"planner"}'
+```
+
+**Without the app or the database at all** - the cheapest way to try a change:
+
+```python
+from invplanner import model_config as cfg
+from invplanner.engine import Reference, Scenario, simulate
+from invplanner.modelprep import build
+from invplanner.optimizer import greedy
+
+ref = Reference.load("data/seed/reference.json")
+scn = Scenario.load("data/seed/scenario.json")
+sim = simulate(ref, scn, physical=True)
+dates = scn.dates[:42]
+down = {u: cfg.turnaround_days(u) for u in cfg.TURNAROUNDS}
+spec = build(ref, scn, sim, horizon=dates, downtime=down)
+
+res = greedy.solve(ref, scn, spec, {"objective": "cost",
+                                    "lost_sale_margin_per_gal": 1.50,
+                                    "downgrade_discount_per_gal": 0.50,
+                                    "switch_cost": 2000.0}, horizon=dates,
+                   downtime=down)
+print(res.status, res.solve_seconds, res.kpis["lost_sales_gal"])
+```
+
+**Measured on real scenarios**, run through the API at 42 days. Lost sales are
+gallons, and the improvement is against the plan the run started from:
+
+    base scenario                        verified   baseline lost   greedy lost
+      48  Cold start (fresh uploads)      yes           9,428,494     1,010,410
+      49  Cold start (MEK/EXTRACT free)   yes           6,211,946     1,196,406
+      46  Plan Spring TAR                 NO            9,336,869     2,465,202
+
+**Known limits. Read these before trusting a run.**
+
+  * **42 days is the supported horizon.** At 100 days the seed leaves 23,452 gal
+    of downgrade unrouted on a single day and the run does not verify; past that
+    it degrades badly.
+  * **It fails on some scenarios, and scenario 46 is the known one.** It comes
+    back `unverified` with a 338,344 gal feed shortfall - the schedule asks units
+    to charge feed the tanks cannot supply. The cause is **not** the turnaround
+    windows on that scenario, which was the obvious guess: the shortfall is
+    already there at a 20-day horizon that ends well before the first outage, and
+    it does not move between 20, 24 and 30 days. `9713`, the diesel charge pool,
+    carries part of it. Unresolved.
+  * **Always read the verification.** These two limits are exactly why the run
+    status is worth more than the KPIs: a schedule that improves lost sales by 74%
+    and cannot be executed is not an improvement.
+
 ### Re-importing after the workbook changes
 
 ```bash
