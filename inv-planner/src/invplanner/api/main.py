@@ -357,10 +357,10 @@ def post_optimizer_run(body: OptimizeRunIn,
                        db: Session = Depends(get_session)) -> Dict[str, Any]:
     busy = optsvc.running_run(db)
     if busy is not None:
-        on = db.query(Scenario).get(busy.base_scenario_id)
+        on = optsvc.scenario_labels(db).get(busy.base_scenario_id, {})
         raise HTTPException(409, "run {} is still solving on \"{}\" - wait for it "
                                  "to finish before starting another".format(
-                                     busy.id, on.name if on else busy.base_scenario_id))
+                                     busy.id, on.get("label", busy.base_scenario_id)))
     p = optsvc.active_params(db)
     if p.missing():
         raise HTTPException(400, "missing optimizer inputs: {}".format(
@@ -383,14 +383,15 @@ def _scenario_dict(s: Scenario) -> Dict[str, Any]:
 
 @app.get("/api/scenarios")
 def list_scenarios(db: Session = Depends(get_session)) -> List[Dict[str, Any]]:
-    # The status of the run each result came from, latest run winning, so the
-    # picker can mark a schedule the simulator rejected.
-    run_status = {r.result_scenario_id: r.status for r in
-                  db.query(OptimizerRun)
-                  .filter(OptimizerRun.result_scenario_id.isnot(None))
-                  .order_by(OptimizerRun.id)}
-    return [dict(_scenario_dict(s), run_status=run_status.get(s.id)) for s in
-            db.query(Scenario).order_by(Scenario.id.desc()).all()]
+    # Kind and on-screen label for each, so the picker can group Current Plans
+    # apart from Optimized Results and mark a result the simulator rejected.
+    labels = optsvc.scenario_labels(db)
+    out = []
+    for s in db.query(Scenario).order_by(Scenario.id.desc()).all():
+        row = dict(_scenario_dict(s), run_status=None)
+        row.update(labels.get(s.id, {}))
+        out.append(row)
+    return out
 
 
 @app.post("/api/scenarios")
@@ -417,9 +418,10 @@ def _get_scenario(db: Session, scenario_id: int) -> Scenario:
 
 @app.get("/api/scenarios/{scenario_id}")
 def get_scenario(scenario_id: int, db: Session = Depends(get_session)) -> Dict[str, Any]:
-    out = _scenario_dict(_get_scenario(db, scenario_id))
-    # The warm start / result pair, so the schedule view can offer the other half
-    # without the planner hunting for its id.
+    out = dict(_scenario_dict(_get_scenario(db, scenario_id)), run_status=None)
+    out.update(optsvc.scenario_labels(db).get(scenario_id, {}))
+    # The Current Plan / Optimized Result pair, so the schedule view can offer
+    # the other half without the planner hunting for its id.
     out["pair"] = optsvc.pair_for(db, scenario_id)
     return out
 
@@ -784,7 +786,9 @@ def get_schedule(scenario_id: int, days: int = Query(42, le=400), offset: int = 
                     if abs(row["values"].get(k, 0.0)
                            - row.get("compare", {}).get(k, 0.0)) > 0.5)
         out["compare"] = {"scenario_id": compare_with.id,
-                          "name": compare_with.name, "cells_changed": moved}
+                          "name": optsvc.scenario_labels(db).get(
+                              compare_with.id, {}).get("label", compare_with.name),
+                          "cells_changed": moved}
     return out
 
 
@@ -799,11 +803,13 @@ def export_schedule(scenario_id: int, days: int = Query(42, le=400),
     paste would flatten.
     """
     s = _get_scenario(db, scenario_id)
+    label = optsvc.scenario_labels(db).get(s.id, {})
     rejected = optsvc.rejected_result(db, s.id)
     if rejected is not None:
         raise HTTPException(409, "\"{}\" is the answer of run {}, which the "
                                  "simulator rejected, so it is not exported: {}"
-                            .format(s.name, rejected.id, rejected.message or ""))
+                            .format(label.get("label", s.name), rejected.id,
+                                    rejected.message or ""))
     ref = svc.engine_reference(db, s.reference_version_id)
     dates = [svc._d(x) for x in s.inputs["dates"]][offset:offset + days]
     if not dates:
@@ -820,11 +826,11 @@ def export_schedule(scenario_id: int, days: int = Query(42, le=400),
            .order_by(OptimizerRun.id.desc()).first())
     blob = exporter.schedule_workbook(
         cfg.live_charge_lines(ref.charge_lines), values, dates,
-        title="Charge schedule - {}".format(s.name),
-        subtitle=("Optimizer run {} ({}), warm started from scenario {}."
+        title="Charge schedule - {}".format(label.get("label", s.name)),
+        subtitle=("Optimized Result of run {} ({}), from \"{}\"."
                   .format(run.id, (run.params or {}).get("model_version", "v0"),
-                          run.base_scenario_id) if run else
-                  "Built on the planning side."))
+                          label.get("plan_label")) if run else
+                  "Current Plan, built on the planning side."))
     name = "schedule-{}-{}-to-{}.xlsx".format(
         s.id, dates[0].isoformat(), dates[-1].isoformat())
     return Response(

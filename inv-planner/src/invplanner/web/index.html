@@ -24,7 +24,7 @@
       <span>Scenario</span>
       <select id="scenario-select"></select>
     </label>
-    <button id="new-scenario" class="btn ghost" title="Freeze current staging into a new scenario">New scenario</button>
+    <button id="new-scenario" class="btn ghost" title="Make a new Current Plan from the source data">New scenario</button>
   </div>
 </header>
 
@@ -291,7 +291,7 @@
     <div class="view-head">
       <div>
         <h2>Runs &amp; results</h2>
-        <p class="muted">Each run reads the selected scenario, solves, and writes its answer back as a new scenario — so a proposed schedule opens on the planning side exactly like one you built.</p>
+        <p class="muted">Each run solves the selected Current Plan and writes its answer back as an Optimized Result — a scenario that opens on the planning side like any other.</p>
       </div>
       <button id="opt-run" class="btn">Run optimizer</button>
     </div>

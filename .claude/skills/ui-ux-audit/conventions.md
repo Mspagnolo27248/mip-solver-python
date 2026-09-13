@@ -167,3 +167,8 @@ These are still open, either outside that audit's scope or not yet seen on scree
   can't reach. S3.
 - **Stylesheet drift.** The stylesheet switches from px to rem after the `optimizer`
   comment. S4.
+- **Tabs slide under the header.** `.tabs` sticks at `top: 55px`, but the header is 79 px
+  tall at 1366 px wide and 85 px at 956, because the line under the title wraps. When
+  the page scrolls, the top of the tab bar is hidden. Measured on 2026-09-13; the
+  header's height is the same with or without the step 3 "Current Plan ·" prefix, so
+  this was already there. S3.

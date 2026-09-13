@@ -31,13 +31,14 @@ memory, so a reload resets them.
 | State | Set by | After a reload |
 |---|---|---|
 | Mode | Planning / Optimizer switch | Planning, on Capacity & alerts |
-| Selected scenario | `#scenario-picker`, and several actions that change it for you (section 4) | The newest scenario, which is often an optimizer result |
+| Selected scenario | `#scenario-picker`, and several actions that change it for you (section 4) | The newest Current Plan |
 
-The line under the title (`#scenario-meta`) reads "as of *date* · *N* day horizon ·
-reference v*N*". It doesn't say whether the scenario is a plan or an optimizer
-result. The picker shows only names, newest first. On 2026-09-12 it held 73 scenarios, 56 of
-them optimizer results, the longest name four "(from …)" deep. ⚠ The picker grows
-to fit the longest name, which pushed New scenario off a 956 px wide view.
+The line under the title (`#scenario-meta`) starts with the kind - "Current Plan" or
+"Optimized Result of run *N*" - then "as of *date* · *N* day horizon · reference
+v*N*". The picker has two groups, Current Plans then Optimized Results, each newest
+first. A result is labelled from its run, "Run 72 · greedy · from Plan 2026-09-13"
+(`scenario_labels`), with the stored name in the option's tooltip, and the picker's
+width is capped. On 2026-09-12 it held 73 scenarios, 56 of them Optimized Results.
 
 ### Scope: what an edit reaches
 
@@ -46,12 +47,12 @@ This is the question a planner most often can't answer from the screen.
 | Data | Edited on | Scope | When it reaches a scenario |
 |---|---|---|---|
 | Source data: the six feeds (uploads, sync, overrides) | Source data | One global copy | **Only when a scenario is created.** The scenario freezes the values then. Later uploads, syncs and overrides never reach existing scenarios |
-| Model inputs: yields, rates, capacities, control limits | Model inputs | One global copy | **Straight away, in every scenario.** Each edit clears every scenario's cached projection (`patch_reference`), including optimizer results scored before the edit |
+| Model inputs: yields, rates, capacities, control limits | Model inputs | One global copy | **Straight away, in every scenario.** Each edit clears every scenario's cached projection (`patch_reference`), including Optimized Results scored before the edit |
 | Optimizer inputs | Optimizer inputs | One global set | Every run started afterwards, on any scenario |
 | Charge schedule, crude rate and mode, planned downtime | Charge schedule | This scenario | Straight away; each cell saves when you leave it |
 | Opening inventory, orders and forecast inside a scenario | Nowhere | This scenario, frozen when it was created | Can't be edited. Make a new scenario |
 | Plan date (`as_of`) and horizon (366 days) | The New scenario prompt only | This scenario | Can't be changed after creation. There is no delete in the UI either |
-| Optimizer runs | Runs & results | One global list, last 25, not filtered by scenario; one run at a time | Each result lands as a new scenario with status `proposed` |
+| Optimizer runs | Runs & results | One global list, last 25, not filtered by scenario; one run at a time | Each lands as an Optimized Result (a scenario with status `proposed`) |
 
 ⚠ The header scenario picker stays visible on the three global tabs: Source data,
 Model inputs and Optimizer inputs.
@@ -87,8 +88,8 @@ flowchart LR
   MODE -- "Optimizer" --> PARAMS
   ALERTS -- "click a row" --> PROJ
   DASH -- "click a chart" --> PROJ
-  RUNS -- "Open schedule / Compare with my schedule<br/>changes mode and scenario" --> SCHED
-  SCHED -- "Switch to warm start / optimizer<br/>changes scenario" --> SCHED
+  RUNS -- "Open schedule / Compare with Current Plan<br/>changes mode and scenario" --> SCHED
+  SCHED -- "Switch to Current Plan / Optimized Result<br/>changes scenario" --> SCHED
   FEEDS -- "Create scenario from source data<br/>same handler" --> NEW
   NEW -- "selects the new scenario" --> PICK
 ```
@@ -119,7 +120,7 @@ flowchart TD
   EDIT["Charge schedule edits"] -->|"this scenario only"| SIM
   OPT["Optimizer inputs (global)"] --> RUN
   SEL -->|"Run optimizer on the selected scenario"| RUN["Optimizer run<br/>the page waits for the whole solve"]
-  RUN -->|"copy of base + solved charges, status proposed"| RES["Result scenario<br/>Optimizer run N (from base)"]
+  RUN -->|"copy of base + solved charges, status proposed"| RES["Optimized Result<br/>Run N · model · from plan"]
   RES -. "the UI refuses to run it again" .-> RUN
   RES --> SIM
 ```
@@ -133,14 +134,14 @@ change that" confusion comes from.
 
 | Trigger | What changes | What the planner is told |
 |---|---|---|
-| Load or reload | Planning mode, Capacity & alerts, **newest** scenario (`boot`) | The picker shows it |
+| Load or reload | Planning mode, Capacity & alerts, **newest Current Plan** (`boot`) | The picker and the line under the title |
 | Choosing a scenario | The projection product resets to the first product. Schedule "From day" options are rebuilt. The fill range resets to the whole horizon. The compare setting, dashboard group, stream and window pickers carry over. The current tab reloads | The meta line changes |
 | Switching mode | The other mode's tabs hide, and the first tab of this mode opens | The tab highlight |
 | Clicking an alert row or chart card | Inventory projection opens with that product selected | Nothing |
 | **A run starting** (`runOptimizer`) | The run button is disabled and reads "Solving on *plan* · started …, stops by about …"; a "solving" card heads the runs list. The server refuses another run until this one ends (409). A row left `running` by a stopped server stops counting after twice its time limit plus ten minutes, and reads "interrupted" | The button and the card |
 | **A run finishing** | The runs list and the picker reload. The plan the run started from **stays selected** (`loadScenarioList`) | "Run #N finished: *outcome*. Its card is at the top." |
-| Open schedule / Compare with my schedule | Reloads the scenario list, selects the result, switches to Planning, opens Charge schedule. Compare is on only for "Compare with my schedule" | A toast |
-| Switch to *warm start* / *optimizer* (compare bar) | Selects the other half of the pair, and ⚠ **turns compare off** | A toast |
+| Open schedule / Compare with Current Plan | Reloads the scenario list, selects the result, switches to Planning, opens Charge schedule. Compare is on only for "Compare with Current Plan" | A toast |
+| Switch to *Current Plan* / *Optimized Result* (compare bar) | Selects the other half of the pair, and ⚠ **turns compare off** | A toast |
 | New scenario created | Reloads the list, selects the new scenario, stays on the current tab | "Scenario X created from the current source data" (⚠ doesn't mention the copied grid) |
 | Model input edited | Every scenario's projection is recalculated on the server | "Saved *value* — projections recalculated" (⚠ doesn't say it's all scenarios) |
 
@@ -155,7 +156,7 @@ their head because the screen doesn't show it. That column is the one to audit.
 
 | # | Where | Planner does | Touches | Must remember |
 |---|---|---|---|---|
-| 1 | Header | Checks the picker shows the plan they mean | - | ⚠ The page opens on the newest scenario, which may be an optimizer result |
+| 1 | Header | Checks the picker shows the plan they mean | - | The page opens on the newest Current Plan, and the line under the title names the kind |
 | 2 | Capacity & alerts | Sets Window (`#alert-window`) | Display | |
 | 3 | Capacity & alerts | Reads the four stats and the table, clicks a product | Display | |
 | 4 | Inventory projection | Reads the chart and daily table | Display | ⚠ Headers use "Orders", "Charged out" and "Headroom"; the alerts table uses other words |
@@ -180,8 +181,8 @@ their head because the screen doesn't show it. That column is the one to audit.
 | 3 | Optimizer → Optimizer inputs | Model, horizon, prices, time limit | **Global**: every future run | A value the server rejects is replaced by the stored value, with the error in a toast (`saveOptParam`) |
 | 4 | Runs & results | Run optimizer on "X" | New run, and a new result scenario | The button is disabled for the whole solve and says when the run started and when it stops; a card marks it solving, and a second run is refused |
 | 5 | Runs & results | Reads the new card: status pill, schedule comparison, the four checks, campaign shape | - | "verified · not proved optimal" is the good result. ⚠ A proved-optimal run shows the same green "verified" |
-| 6 | Runs & results | Compare with my schedule | Changes mode, scenario and tab | |
-| 7 | Charge schedule compare bar | Hide / Switch to warm start | Changes scenario | ⚠ "warm start" is code vocabulary, and Switch turns compare off |
+| 6 | Runs & results | Compare with Current Plan | Changes mode, scenario and tab | |
+| 7 | Charge schedule compare bar | Hide / Switch to Current Plan | Changes scenario | ⚠ Switch turns compare off |
 | 8 | Charge schedule or run card | Export for Excel | Download of the visible window, or the run's horizon | |
 | 9 | Runs & results | The README's greedy → v2 chain: run v2 on greedy's result | - | ⚠ **The UI refuses this, confirmed in code.** Every model's result, greedy included, is saved by `_write_result_scenario` with status `proposed` (`optimizer_service.py:282`), and `runOptimizer` blocks a proposed scenario. The README's chain only works through the API |
 
@@ -273,10 +274,11 @@ only what is shown.
   - From / To, Only days the unit is idle, Apply.
 - **Compare bar:**
   - Always: Export for Excel.
-  - When the scenario has a pair: a pill (Optimizer proposal / Your schedule),
-    Compare with or Hide *warm start/optimizer*, and Switch to *warm start/optimizer*.
+  - When the scenario has a pair: a pill (Current Plan / Optimized Result), Compare
+    with or Hide *the other*, and Switch to *the other*.
   - The pair is the most recent run on that scenario only (`pair_for`).
-  - Otherwise: "Run the optimizer on this schedule to compare it with a proposal."
+  - Otherwise: "Run the optimizer on this Current Plan to compare it with an Optimized
+    Result."
 - **Grid:**
   - Crude charge row and Crude mode row.
   - For each unit: a heading row with the downtime count, a Down toggle row, and one
@@ -305,15 +307,15 @@ only what is shown.
 **Runs & results** (`#view-optruns`)
 - Run optimizer on "*scenario*" (amber when the scenario is a result).
 - One card per run, last 25, all scenarios:
-  - Header: Run #, status pill, model pill, time · seconds · $objective, "warm started
-    from *base*".
-  - A comparison table: Your schedule / Optimizer / Change.
+  - Header: Run #, status pill, model pill, time · seconds · $objective, "from Current Plan
+    “*label*”".
+  - A comparison table: Current Plan / Optimized Result / Change.
   - Four checks, then campaign shape.
   - The run's message is on the card: why it is unverified, or why it is not proved
     optimal.
   - "Settings used" (collapsed) lists the optimizer inputs the run was given, next to
     the inputs now, and counts the ones that differ.
-  - Actions: Open schedule, Compare with my schedule, Export for Excel.
+  - Actions: Open schedule, Compare with Current Plan, Export for Excel.
   - An unverified run offers "Inspect the rejected schedule" and no export. The export
     endpoint refuses it too, the picker adds "· unverified" to its name, and its
     compare bar shows "unverified · not exportable" instead of Export for Excel.

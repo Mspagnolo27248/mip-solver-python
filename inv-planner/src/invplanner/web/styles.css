@@ -54,13 +54,18 @@ p { margin: 2px 0 0; }
   gap: 24px; padding: 12px 22px; background: var(--surface);
   border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20;
 }
-.brand { display: flex; align-items: center; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .mark {
   width: 30px; height: 30px; border-radius: 8px; flex: none;
   background: linear-gradient(140deg, var(--accent), #7c4dff);
 }
 .topbar p { font-size: 12px; color: var(--muted); }
 .topbar-controls { display: flex; align-items: flex-end; gap: 12px; }
+/* The picker grew to its longest name - four nested "(from ...)" deep - and
+   pushed New scenario off a 956 px window. Capped; the full stored name is in
+   each option's tooltip. */
+#scenario-select { max-width: min(360px, 30vw); text-overflow: ellipsis; }
+.topbar .btn { white-space: nowrap; }
 
 /* Planning vs Optimizer: two different jobs, kept visibly apart */
 .mode-switch {

@@ -991,3 +991,74 @@ def test_a_schedule_the_simulator_rejected_is_not_exported(db):
         assert pair["run_status"] == "unverified"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_results_are_labelled_from_their_run_and_their_current_plan(db):
+    """Result names nested - "Optimizer run 21 (from Optimizer run 20 (from
+    ...))" - until the picker pushed New scenario off the screen. A result is
+    labelled from its run and the Current Plan at the root of the chain, new
+    results are stored under that short name, and the schedule's pair speaks
+    in Current Plan / Optimized Result."""
+    import datetime as dt
+
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db import service as svc
+    from invplanner.db.models import OptimizerRun, Scenario
+    from invplanner.db.session import get_session
+
+    class _Result:                       # what a solver hands back
+        charge = {}
+        transfer_bbl = {}
+
+    plan = svc.create_scenario(db, "Plan labels", dt.date(2026, 7, 23), 60, "test")
+    first_id = optsvc._write_result_scenario(db, plan, _Result(), "test", 0,
+                                             model_version="greedy")
+    run1 = OptimizerRun(base_scenario_id=plan.id, result_scenario_id=first_id,
+                        created_by="test", params={"model_version": "greedy"},
+                        status="not_proved_optimal")
+    db.add(run1)
+    db.commit()
+    # refined from the result, as "Refine with v2" will
+    first = db.query(Scenario).get(first_id)
+    refined_id = optsvc._write_result_scenario(db, first, _Result(), "test", 0,
+                                               model_version="v2")
+    run2 = OptimizerRun(base_scenario_id=first_id, result_scenario_id=refined_id,
+                        created_by="test", params={"model_version": "v2"},
+                        status="not_proved_optimal")
+    db.add(run2)
+    db.commit()
+
+    labels = optsvc.scenario_labels(db)
+    assert labels[plan.id]["kind"] == "current_plan"
+    assert labels[plan.id]["label"] == "Plan labels"
+    assert labels[first_id]["kind"] == "optimized_result"
+    assert labels[first_id]["label"] == \
+        "Run {} \u00b7 greedy \u00b7 from Plan labels".format(run1.id)
+    # two deep, and still named after the plan rather than nested
+    assert labels[refined_id]["label"] == \
+        "Run {} \u00b7 v2 \u00b7 from Plan labels".format(run2.id)
+    assert labels[refined_id]["plan_id"] == plan.id
+    stored = db.query(Scenario).get(refined_id).name
+    assert "(from" not in stored and stored.endswith("from Plan labels")
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    try:
+        listed = {s["id"]: s for s in client.get("/api/scenarios").json()}
+        assert listed[plan.id]["kind"] == "current_plan"
+        assert listed[first_id]["kind"] == "optimized_result"
+
+        on_result = client.get("/api/scenarios/{}".format(first_id)).json()
+        assert on_result["plan_label"] == "Plan labels"
+        assert on_result["pair"]["role"] == "optimized_result"
+        assert on_result["pair"]["other_role"] == "current_plan"
+        assert on_result["pair"]["other_label"] == "Plan labels"
+
+        on_plan = client.get("/api/scenarios/{}".format(plan.id)).json()
+        assert on_plan["pair"]["role"] == "current_plan"
+        assert on_plan["pair"]["other_role"] == "optimized_result"
+    finally:
+        app.dependency_overrides.clear()

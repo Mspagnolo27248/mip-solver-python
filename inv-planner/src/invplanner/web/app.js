@@ -93,9 +93,19 @@ function toast(msg) {
 async function loadScenarioList() {
   state.scenarios = await api('/api/scenarios');
   const sel = $('#scenario-select');
-  sel.innerHTML = '';
-  state.scenarios.forEach((s) => sel.appendChild(el('option', { value: s.id },
-    s.name + (s.run_status === 'unverified' ? ' · unverified' : ''))));
+  // Two groups, Current Plans first. One flat list held 73 scenarios, 56 of
+  // them results, and a plan was easy to miss among them. The stored name is
+  // kept in the tooltip; the label is what the rest of the screen uses.
+  const plans = state.scenarios.filter((s) => s.kind !== 'optimized_result');
+  const results = state.scenarios.filter((s) => s.kind === 'optimized_result');
+  const option = (s) => el('option', { value: s.id, title: s.name },
+    s.label + (s.run_status === 'unverified' ? ' · unverified' : ''));
+  sel.replaceChildren(
+    el('optgroup', { label: `Current Plans (${plans.length})` }, plans.map(option)),
+    ...(results.length
+      ? [el('optgroup', { label: `Optimized Results (${results.length})` },
+          results.map(option))]
+      : []));
   if (state.scenario) sel.value = state.scenario.id;
 }
 
@@ -105,14 +115,23 @@ async function boot() {
     $('#scenario-meta').textContent = 'No scenario yet — create one to begin.';
     return;
   }
-  $('#scenario-select').value = state.scenarios[0].id;
-  await selectScenario(state.scenarios[0].id);
+  // Open on the newest Current Plan. The newest scenario of any kind is
+  // usually an Optimized Result, which the run button then refuses.
+  const first = state.scenarios.find((s) => s.kind !== 'optimized_result')
+    || state.scenarios[0];
+  $('#scenario-select').value = first.id;
+  await selectScenario(first.id);
 }
 
 async function selectScenario(id) {
   state.scenario = await api(`/api/scenarios/${id}`);
+  const s = state.scenario;
+  // Say which kind is selected: nothing on screen told a plan from a result.
+  const what = s.kind === 'optimized_result'
+    ? `Optimized Result of run ${s.run_id}${s.run_status === 'unverified' ? ' (unverified)' : ''}`
+    : 'Current Plan';
   $('#scenario-meta').textContent =
-    `as of ${state.scenario.as_of} · ${state.scenario.horizon_days} day horizon · reference v${state.scenario.reference_version_id}`;
+    `${what} · as of ${s.as_of} · ${s.horizon_days} day horizon · reference v${s.reference_version_id}`;
   state.products = await api(`/api/scenarios/${id}/products`);
   const psel = $('#product-select');
   psel.innerHTML = '';
@@ -164,7 +183,7 @@ function refreshRunButton() {
   btn.disabled = !!r;
   if (r) {
     btn.classList.remove('warn');
-    btn.textContent = `Solving on “${r.base_scenario_name}” · ${runClock(r)}`;
+    btn.textContent = `Solving on “${r.base_scenario_label}” · ${runClock(r)}`;
     btn.title = 'One run at a time - the button comes back when this one finishes';
     return;
   }
@@ -173,15 +192,16 @@ function refreshRunButton() {
     btn.textContent = 'Run optimizer';
     return;
   }
-  btn.textContent = `Run optimizer on “${s.name}”`;
-  const proposed = s.status === 'proposed';
-  btn.classList.toggle('warn', proposed);
-  btn.title = proposed
-    ? 'This schedule is itself an optimizer result. Re-solving one is not '
-      + 'supported: the charge floor is a fraction of whatever you feed in, so '
-      + 'each pass adds a new minimum on every line-day the last one created, '
-      + 'and the model goes infeasible. Pick the plan you started from.'
-    : 'Solves this schedule and writes the answer back as a new scenario';
+  btn.textContent = `Run optimizer on “${s.label}”`;
+  const isResult = s.kind === 'optimized_result';
+  btn.classList.toggle('warn', isResult);
+  btn.title = isResult
+    ? 'This is an Optimized Result, and the optimizer runs on a Current Plan. '
+      + 'Running a result again is not supported: the charge floor is a fraction '
+      + 'of whatever it is given, so each pass adds a new minimum on every '
+      + 'line-day the last one created, and the model goes infeasible. Select '
+      + `its Current Plan, “${s.plan_label}”.`
+    : 'Solves this Current Plan and writes the answer back as an Optimized Result';
 }
 
 function activeView() {
@@ -833,8 +853,8 @@ async function removeDowntime(id) {
   loadSchedule();
 }
 
-/* The warm start / result pair. A planner holding their own schedule wants the
-   optimizer's beside it; holding a proposal, they want their own back. Same
+/* The Current Plan / Optimized Result pair. A planner holding their plan wants
+   its result beside it; holding the result, they want the plan back. Same
    question, so one control serves both directions. */
 /* Hand the planner a block to paste rather than writing their workbook. That
    file carries 192 charts and a VBA project; editing it in place drops parts of
@@ -857,7 +877,9 @@ function renderCompareBar(pair, compare) {
     onclick: exportSchedule,
   }, 'Export for Excel');
   // A schedule the simulator rejected is kept to be inspected, never exported.
-  const exportCtl = pair && pair.role === 'result' && pair.run_status === 'unverified'
+  const roleWord = (role) => (role === 'optimized_result' ? 'Optimized Result' : 'Current Plan');
+  const exportCtl = pair && pair.role === 'optimized_result'
+    && pair.run_status === 'unverified'
     ? el('span', {
         class: 'pill warn',
         title: 'The simulator rejected this schedule, so it cannot be exported',
@@ -866,27 +888,27 @@ function renderCompareBar(pair, compare) {
   if (!pair || !pair.other_id) {
     host.replaceChildren(
       el('span', { class: 'muted' },
-        'Run the optimizer on this schedule to compare it with a proposal.'),
+        'Run the optimizer on this Current Plan to compare it with an Optimized Result.'),
       exportBtn);
     return;
   }
   const showing = state.compare;
   host.replaceChildren(
     exportCtl,
-    el('span', { class: 'pill info' },
-      pair.role === 'result' ? 'Optimizer proposal' : 'Your schedule'),
+    el('span', { class: 'pill info' }, roleWord(pair.role)),
     el('button', {
       class: showing ? 'btn' : 'linkish',
       title: showing
         ? 'Hide the other schedule'
-        : `Show ${pair.other_name} under each cell`,
+        : `Show “${pair.other_label}” under each cell`,
       onclick: () => { state.compare = !state.compare; loadSchedule(); },
-    }, showing ? `Hide ${pair.other_role}` : `Compare with ${pair.other_role}`),
+    }, showing ? `Hide ${roleWord(pair.other_role)}`
+      : `Compare with ${roleWord(pair.other_role)}`),
     el('button', {
       class: 'linkish',
-      title: 'Switch the grid to the other schedule',
+      title: `Switch the grid to “${pair.other_label}”`,
       onclick: () => openResult(pair.other_id, null),
-    }, `Switch to ${pair.other_role}`),
+    }, `Switch to ${roleWord(pair.other_role)}`),
     // Spread, not `: null` - unlike el(), replaceChildren prints a null child
     // as the word "null", which is what the bar ended with.
     ...(compare
@@ -1304,7 +1326,7 @@ async function loadOptRuns() {
   const host = $('#opt-runs');
   if (!runs.length) {
     host.replaceChildren(el('div', { class: 'empty' },
-      'No runs yet. Set the inputs, then run the optimizer on the selected scenario.'));
+      'No runs yet. Set the inputs, select a Current Plan, then run the optimizer on it.'));
     return;
   }
   host.replaceChildren();
@@ -1315,9 +1337,9 @@ async function loadOptRuns() {
           el('h3', {}, `Run #${r.id}`),
           el('span', { class: 'pill info' }, 'solving'),
           el('span', { class: 'pill info' }, r.model_version || 'v0'),
-          el('span', { class: 'muted' }, `on ${r.base_scenario_name} · ${runClock(r)}`)),
+          el('span', { class: 'muted' }, `on “${r.base_scenario_label}” · ${runClock(r)}`)),
         el('p', { class: 'run-message' },
-          'Its answer lands here, and as a new scenario, when the solve ends.')));
+          'Its answer lands here, and as an Optimized Result, when the solve ends.')));
       continue;
     }
     const k = r.kpis || {};
@@ -1346,6 +1368,9 @@ async function loadOptRuns() {
               title: r.message || '',
             }, r.status);
 
+    // What the run started from - a Current Plan, or for a refined run an
+    // Optimized Result.
+    const baseWord = r.base_kind === 'optimized_result' ? 'Optimized Result' : 'Current Plan';
     const head = el('div', { class: 'run-head' },
       el('h3', {}, `Run #${r.id}`),
       badge,
@@ -1355,12 +1380,13 @@ async function loadOptRuns() {
         + `${r.solve_seconds ? r.solve_seconds.toFixed(1) + 's' : '—'}`
         + (r.objective != null ? ` · $${fmt(r.objective)}` : '')),
       el('span', { class: 'muted' },
-        `warm started from ${r.base_scenario_name || ('#' + r.base_scenario_id)}`),
+        `from ${baseWord} “${r.base_scenario_label || ('#' + r.base_scenario_id)}”`),
     );
 
     // Both sides scored the same way - the comparison is meaningless otherwise.
     const cmp = table(
-      ['', 'Your schedule', 'Optimizer', 'Change'],
+      ['', r.base_kind === 'optimized_result' ? 'Started from' : 'Current Plan',
+        'Optimized Result', 'Change'],
       [
         ['Lost sales (gal)', base.lost_sales_gal, opt.lost_sales_gal],
         ['Downgrade (gal)', base.downgrade_gal, opt.downgrade_gal],
@@ -1426,14 +1452,14 @@ async function loadOptRuns() {
         class: rejected ? 'btn ghost' : 'btn',
         title: rejected
           ? 'Open the schedule the simulator rejected, to see what went wrong'
-          : 'Open the proposed schedule on the planning side',
+          : 'Open the Optimized Result on the planning side',
         onclick: () => openResult(r.result_scenario_id),
       }, rejected ? 'Inspect the rejected schedule' : 'Open schedule') : null,
       r.result_scenario_id ? el('button', {
         class: 'linkish',
-        title: 'Open it beside the schedule it warm started from',
+        title: `Open it beside the ${baseWord} it started from`,
         onclick: () => openResult(r.result_scenario_id, r.base_scenario_id),
-      }, 'Compare with my schedule') : null,
+      }, `Compare with ${baseWord}`) : null,
       r.result_scenario_id && !rejected ? el('button', {
         class: 'linkish',
         title: 'Download it as blocks that paste into the workbook',
@@ -1461,16 +1487,12 @@ async function runOptimizer() {
   // A result scenario cannot be re-solved - see `refreshRunButton`. Caught here
   // rather than left to come back `no_solution` after a long solve, because the
   // failure looks like a bad model and is really a bad starting point.
-  if (state.scenario.status === 'proposed') {
-    // Peel every layer: chained runs nest their names, so one pass would point
-    // at another result and send you round the loop again.
-    let from = state.scenario.name;
-    for (let prev = null; prev !== from; ) {
-      prev = from;
-      from = from.replace(/^Optimizer run \d+ \(from (.*)\)$/, '$1');
-    }
-    toast(`“${state.scenario.name}” is an optimizer result, so it cannot be `
-      + `re-solved. Select “${from}” — the schedule it came from — and run that.`);
+  if (state.scenario.kind === 'optimized_result') {
+    // Name the Current Plan at the root of the chain, not the scenario this one
+    // came from - for a refined run that is another result, and pointing at it
+    // sent the planner round the loop again.
+    toast(`“${state.scenario.label}” is an Optimized Result, so it can't be run `
+      + `again. Select its Current Plan, “${state.scenario.plan_label}”, and run that.`);
     return;
   }
   if (state.running) return;
@@ -1480,7 +1502,7 @@ async function runOptimizer() {
   // row replaces this as soon as the runs list has it.
   const { params } = await api('/api/optimizer/params');
   state.running = {
-    base_scenario_name: base.name, created_at: new Date().toISOString(),
+    base_scenario_label: base.label, created_at: new Date().toISOString(),
     time_limit_seconds: params.time_limit_seconds, model_version: params.model_version,
   };
   state.runPending = true;
@@ -1516,7 +1538,7 @@ async function openResult(scenarioId, compareWith) {
   setMode('planning');
   switchTab('schedule');
   toast(compareWith != null
-    ? 'Opened beside the schedule it warm started from'
+    ? 'Opened beside the schedule it started from'
     : 'Opened — edit or compare it like any scenario');
 }
 
