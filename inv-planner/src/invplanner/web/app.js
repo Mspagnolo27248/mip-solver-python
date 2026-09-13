@@ -499,7 +499,7 @@ function drawChart(d) {
   $('#proj-legend').replaceChildren(
     legend('var(--accent)', 'Ending inventory'),
     legend('var(--warn)', 'Tank capacity'),
-    d.lcl != null ? legend('var(--ok)', 'Control band (LCL/UCL)') : null,
+    ...(d.lcl != null ? [legend('var(--ok)', 'Control band (LCL/UCL)')] : []),
     el('span', {}, `${d.code} — ${d.name}`),
   );
 }
@@ -834,28 +834,39 @@ function renderCompareBar(pair, compare) {
       title: 'Switch the grid to the other schedule',
       onclick: () => openResult(pair.other_id, null),
     }, `Switch to ${pair.other_role}`),
-    compare
-      ? el('span', { class: 'muted' },
+    // Spread, not `: null` - unlike el(), replaceChildren prints a null child
+    // as the word "null", which is what the bar ended with.
+    ...(compare
+      ? [el('span', { class: 'muted' },
           `${fmt(compare.cells_changed)} cell${compare.cells_changed === 1 ? '' : 's'} differ`
-          + ` · under each cell is ${compare.name}`)
-      : null,
+          + ` · under each cell is ${compare.name}`)]
+      : []),
   );
 }
 
 async function editSchedule(lineKey, date, bbl) {
-  await api(`/api/scenarios/${state.scenario.id}/schedule`, {
-    method: 'PATCH',
-    body: JSON.stringify({ line_key: lineKey, date, bbl }),
-  });
+  try {
+    await api(`/api/scenarios/${state.scenario.id}/schedule`, {
+      method: 'PATCH',
+      body: JSON.stringify({ line_key: lineKey, date, bbl }),
+    });
+  } catch (e) {
+    loadSchedule();  // refused: put the stored value back (see saveOptParam)
+    return;
+  }
   toast(`Saved ${bbl.toLocaleString()} bbl · projection re-simulated`);
 }
 
 async function editCrude(date, bbl, mode) {
-  await api(`/api/scenarios/${state.scenario.id}/crude`, {
-    method: 'PATCH',
-    body: JSON.stringify({ date, bbl, mode }),
-  });
-  toast(mode ? `Crude mode ${mode} on ${date}` : `Crude charge saved`);
+  try {
+    await api(`/api/scenarios/${state.scenario.id}/crude`, {
+      method: 'PATCH',
+      body: JSON.stringify({ date, bbl, mode }),
+    });
+    toast(mode ? `Crude mode ${mode} on ${date}` : `Crude charge saved`);
+  } catch (e) {
+    // refused - the redraw below puts the stored value back
+  }
   loadSchedule();
 }
 
@@ -992,10 +1003,15 @@ async function loadFeedRows() {
 
 async function saveOverride(id, raw) {
   const value = raw === '' || raw === null ? null : parseFloat(raw);
-  await api(`/api/staging/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ value, reason: 'edited in planner', actor: 'planner' }),
-  });
+  try {
+    await api(`/api/staging/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ value, reason: 'edited in planner', actor: 'planner' }),
+    });
+  } catch (e) {
+    await loadFeedRows();  // refused: put the stored value back (see saveOptParam)
+    return;
+  }
   toast(value === null ? 'Override cleared' : `Override saved (${fmt(value, 2)})`);
   await loadFeeds();
   await loadFeedRows();
@@ -1083,10 +1099,15 @@ async function loadReferenceRows() {
 
 async function saveReference(k1, k2, raw) {
   const value = raw === '' || raw === null ? null : parseFloat(raw);
-  await api(`/api/reference/${state.refKind}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ k1, k2, value, reason: 'edited in planner' }),
-  });
+  try {
+    await api(`/api/reference/${state.refKind}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ k1, k2, value, reason: 'edited in planner' }),
+    });
+  } catch (e) {
+    await loadReferenceRows();  // refused: put the stored value back (see saveOptParam)
+    return;
+  }
   toast(value === null
     ? 'Reset to the imported value — projections recalculated'
     : `Saved ${value} — projections recalculated`);
@@ -1153,6 +1174,7 @@ async function loadOptParams() {
       const f = byField[field];
       const v = p[field];
       const needed = p.missing.includes(field);
+      const blank = v === null || v === undefined;
       const choices = CHOICES[field];
       const input = choices
         ? el('select', {
@@ -1165,16 +1187,10 @@ async function loadOptParams() {
             Object.assign({ value: opt }, String(v) === opt ? { selected: true } : {}),
             label)))
         : el('input', {
-            class: 'ovr-input' + (needed ? '' : ' set'),
+            class: 'ovr-input' + (needed || blank ? '' : ' set'),
             type: 'number', step: 'any',
-            value: v === null || v === undefined ? '' : v,
-            placeholder: needed ? 'required' : '',
-            // A focused number input takes the scroll wheel as increment, so
-            // scrolling the page to reach the Run button edits whatever was last
-            // clicked. That turned a typed 0.30 into -36.7 - 37 wheel clicks -
-            // and the run that followed was ruined in a way nothing on screen
-            // showed. Blur instead, so the wheel scrolls the page.
-            onwheel: (e) => e.target.blur(),
+            value: blank ? '' : v,
+            placeholder: needed ? 'required' : (blank ? 'default' : ''),
             onchange: (e) => saveOptParam(field, e.target.value),
           });
       return el('tr', {},
@@ -1183,7 +1199,14 @@ async function loadOptParams() {
         el('td', {}, f.unit),
         el('td', {}, needed
           ? el('span', { class: 'pill danger' }, 'needed')
-          : el('span', { class: 'pill ok' }, 'set')),
+          // Empty and not required means the model falls back to its own
+          // default. Marking that 'set' said someone had chosen a value.
+          : blank && !choices
+            ? el('span', {
+                class: 'pill info',
+                title: 'Left empty, so the model uses its default - see the help',
+              }, 'default')
+            : el('span', { class: 'pill ok' }, 'set')),
         el('td', { class: 'muted' }, f.help || ''),
       );
     });
@@ -1192,12 +1215,20 @@ async function loadOptParams() {
   }
 }
 
+/* Every save that runs when a box loses focus redraws from the server if the
+   save is refused. `api()` has already shown why; what must not happen is the
+   refused value staying in the box, where it reads exactly like a saved one
+   while the next run quietly uses the old value. */
 async function saveOptParam(field, raw, isText) {
   const value = isText ? raw : (raw === '' ? null : parseFloat(raw));
-  await api('/api/optimizer/params', {
-    method: 'PATCH', body: JSON.stringify({ [field]: value }),
-  });
-  toast('Saved');
+  try {
+    await api('/api/optimizer/params', {
+      method: 'PATCH', body: JSON.stringify({ [field]: value }),
+    });
+    toast('Saved');
+  } catch (e) {
+    // refused - fall through and redraw what is stored
+  }
   loadOptParams();
 }
 
@@ -1378,6 +1409,21 @@ function switchTab(view) {
     v.classList.toggle('active', v.id === `view-${view}`));
   refreshActive();
 }
+
+/* A focused number input takes the scroll wheel as an increment, so scrolling
+   the page past the box you just typed in edits it - and the edit saves when
+   you click away. That turned a typed 0.30 into -36.7 (37 wheel clicks) and
+   ruined a run in a way nothing on screen showed. The guard used to sit on the
+   optimizer inputs alone, while the charge grid and both override tables are
+   number inputs that save the same way. One listener covers every one of
+   them, including rows drawn later: blur, so the wheel scrolls the page. */
+document.addEventListener('wheel', (e) => {
+  const t = e.target;
+  if (t instanceof HTMLInputElement && t.type === 'number'
+      && t === document.activeElement) {
+    t.blur();
+  }
+}, { capture: true });
 
 document.querySelectorAll('.tabs button').forEach((b) =>
   b.addEventListener('click', () => switchTab(b.dataset.view)));

@@ -87,8 +87,10 @@ saying so? Look for:
 - **Success and failure that look the same.** Similar pill colours, or a toast that
   vanishes before it's read.
 
-*In this app:* the scroll-wheel guard (`onwheel` blur) exists only in
-`loadOptParams`. Check every other `type: 'number'` input.
+*In this app:* one `wheel` listener on `document` in `app.js` takes the focus off a
+selected number input so the wheel can't change it. Check that any new number box
+is a real `<input type="number">` the listener can see, and that nothing stops the
+wheel event before it arrives.
 
 ## 5. Where am I, and what's happening
 

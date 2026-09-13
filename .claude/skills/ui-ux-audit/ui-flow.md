@@ -177,7 +177,7 @@ their head because the screen doesn't show it. That column is the one to audit.
 |---|---|---|---|---|
 | 1 | Planning → Charge schedule → Planned downtime | Checks or adds outages | This scenario | ⚠ "Set these before running the optimizer" is written in the other mode |
 | 2 | Header picker | Selects a plan, not a result | - | The run button names it, and turns amber for a result |
-| 3 | Optimizer → Optimizer inputs | Model, horizon, prices, time limit | **Global**: every future run | ⚠ A value the server rejects **stays in the box**: `saveOptParam` doesn't reload after an error, so the screen shows a value that wasn't saved |
+| 3 | Optimizer → Optimizer inputs | Model, horizon, prices, time limit | **Global**: every future run | A value the server rejects is replaced by the stored value, with the error in a toast (`saveOptParam`) |
 | 4 | Runs & results | Run optimizer on "X" | New run, and a new result scenario | ⚠ The request waits for the whole solve (up to the time limit, 900 s has been used). The "Solving…" toast lasts 2.6 s, the button stays clickable, and nothing shows it is still running |
 | 5 | Runs & results | Reads the new card: status pill, schedule comparison, the four checks, campaign shape | - | "verified · not proved optimal" is the good result. ⚠ A proved-optimal run shows the same green "verified" |
 | 6 | Runs & results | Compare with my schedule | Changes mode, scenario and tab | |
@@ -275,8 +275,7 @@ only what is shown.
   - Always: Export for Excel.
   - When the scenario has a pair: a pill (Optimizer proposal / Your schedule),
     Compare with or Hide *warm start/optimizer*, and Switch to *warm start/optimizer*.
-  - The pair is the most recent run on that scenario only (`pair_for`). ⚠ When compare
-    is off, a stray "null" prints at the end of the bar (`renderCompareBar`).
+  - The pair is the most recent run on that scenario only (`pair_for`).
   - Otherwise: "Run the optimizer on this schedule to compare it with a proposal."
 - **Grid:**
   - Crude charge row and Crude mode row.

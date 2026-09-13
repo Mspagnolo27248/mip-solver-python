@@ -21,7 +21,7 @@ The defects that cost the most here were **silent**, not ugly:
 - A run solved the previous run's output because the run button didn't say which
   scenario it would solve, and opening a result changed the selection (`cb491a8`).
 - Scrolling the page past a focused number box turned 0.30 into -36.7 and ruined a
-  run, with nothing on screen to show it (`loadOptParams` comment in `app.js`).
+  run, with nothing on screen to show it (the wheel-guard comment in `app.js`).
 
 Your job is to be the one person who looks at the app **whole**, the way the planner
 will, and to catch this before it ships.

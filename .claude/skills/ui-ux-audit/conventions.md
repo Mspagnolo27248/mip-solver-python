@@ -31,8 +31,8 @@ Each rule was learned from a real failure. The commit or comment is the reason.
    on "X"", not "Run optimizer" (`cb491a8`, `refreshRunButton`).
 3. **Ask when a default could silently spoil a plan.** The plan's first date is
    asked for every time; it isn't taken from the workbook (`de4f5fd`).
-4. **A number input doesn't change on the scroll wheel** (`loadOptParams`,
-   `onwheel` blur).
+4. **A number input doesn't change on the scroll wheel.** One `wheel` listener on
+   `document` in `app.js` covers every number input, including rows drawn later.
 5. **Anything that overwrites many cells reads back its range first** (`applyFill`).
 6. **Judge a run by its verification.** An unverified run must not look usable.
    `verified · not proved optimal` is the normal good result, not a warning

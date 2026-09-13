@@ -99,7 +99,7 @@ LABELS = {
                               "nothing: at 100 days 0.30 and 0.50 lose the same "
                               "gallons."),
     "must_run": (
-        "Units may idle", "on = must run daily",
+        "Units must run daily", "on or off",
         "On, a unit the model decides for has to be running every day it is not "
         "in a turnaround - which is what the plant does, and what stops the "
         "optimizer fixing an inventory problem by switching things off. Turn it "
@@ -110,7 +110,7 @@ LABELS = {
     "min_rate_fraction": (
         "Minimum rate", "fraction of the line's rate",
         "The least a unit the model decides for may charge on a day it runs. "
-        "**Not the charge floor above** - that one is a fraction of your own "
+        "**Not the charge floor** - that one is a fraction of your own "
         "schedule and applies to the units you fixed; this is a fraction of the "
         "line's maximum rate and applies only to the freed ones. 0.60 sits just "
         "under the lowest rate the plant has held mid-campaign (0.64, median "
@@ -141,14 +141,14 @@ LABELS = {
                      "Firm orders cover about 57 days; beyond that demand is "
                      "pure forecast."),
     "time_limit_seconds": ("Solver time limit", "seconds", ""),
-    "mip_gap": ("Accepted gap", "fraction",
+    "mip_gap": ("Accepted gap, as a fraction", "fraction",
                 "Stop when within this fraction of proven optimal. Leave at "
-                "zero and use the dollar figure below: this objective measures "
+                "zero and use the gap in dollars instead: this objective measures "
                 "value given up, so it shrinks as the plan improves and a "
                 "percentage of it tightens on its own every time anything is "
                 "fixed."),
     "mip_gap_abs": (
-        "Accepted gap", "$",
+        "Accepted gap, in dollars", "$",
         "Stop when within this many dollars of proven optimal - the figure "
         "that means something, because it does not move when the objective "
         "does. A changeover costs about $2,000, so $10,000 is \"do not spend "
