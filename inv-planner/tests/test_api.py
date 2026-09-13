@@ -893,3 +893,101 @@ def test_overwriting_still_clears_the_siblings_on_every_day_written(db):
         ScheduleEntry.line_key == other)}
     for d in window[:3]:
         assert not kept.get(d)
+
+
+# ------------------------------------------------------------ optimizer runs
+def test_a_second_run_is_refused_while_one_is_solving(db):
+    """Two v2 runs on the same plan were started 14 s apart, because the button
+    stayed clickable through a 15-minute solve. The server refuses the second.
+    A row left `running` by a server stopped mid-solve must not refuse runs for
+    ever, and reads as interrupted."""
+    import datetime as dt
+
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db import service as svc
+    from invplanner.db.models import OptimizerRun
+    from invplanner.db.session import get_session
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    base = svc.create_scenario(db, "run guard", dt.date(2026, 7, 23), 60, "test")
+    params = dict(optsvc.params_dict(optsvc.active_params(db)),
+                  time_limit_seconds=900)
+    live = OptimizerRun(base_scenario_id=base.id, created_by="test",
+                        params=params, status="running")
+    db.add(live)
+    db.commit()
+    try:
+        r = client.post("/api/optimizer/run", json={"scenario_id": base.id})
+        assert r.status_code == 409, r.text
+        assert "still solving" in r.json()["detail"]
+
+        listed = {x["id"]: x for x in client.get("/api/optimizer/runs").json()}
+        assert listed[live.id]["in_progress"] is True
+        assert listed[live.id]["time_limit_seconds"] == 900
+        # the run carries the settings it was given, labelled as on screen
+        labels = {s["label"] for s in listed[live.id]["settings"]}
+        assert "Units must run daily" in labels
+
+        # a run that should have ended hours ago died with the server
+        live.created_at = dt.datetime.utcnow() - dt.timedelta(hours=3)
+        db.commit()
+        assert optsvc.running_run(db) is None
+        listed = {x["id"]: x for x in client.get("/api/optimizer/runs").json()}
+        assert listed[live.id]["status"] == "interrupted"
+        assert listed[live.id]["in_progress"] is False
+    finally:
+        live.status = "error"   # never leave a live-looking row for other tests
+        db.commit()
+        app.dependency_overrides.clear()
+
+
+def test_a_schedule_the_simulator_rejected_is_not_exported(db):
+    """An unverified run keeps its scenario so the failure can be inspected, but
+    the schedule must not reach the workbook. The export refuses it, and the
+    scenario list and the schedule's pair both say the run was rejected, which
+    is what the picker and the compare bar mark."""
+    import datetime as dt
+
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db import service as svc
+    from invplanner.db.models import OptimizerRun
+    from invplanner.db.session import get_session
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    base = svc.create_scenario(db, "rejected export", dt.date(2026, 7, 23), 60,
+                               "test")
+
+    class _Result:                       # what a solver hands back
+        charge = {}
+        transfer_bbl = {}
+
+    result_id = optsvc._write_result_scenario(db, base, _Result(), "test", 0)
+    run = OptimizerRun(base_scenario_id=base.id, result_scenario_id=result_id,
+                       created_by="test", params={}, status="unverified",
+                       message="The schedule asks units to charge feed the tanks "
+                               "cannot supply.")
+    db.add(run)
+    db.commit()
+    try:
+        r = client.get("/api/scenarios/{}/schedule.xlsx?days=14".format(result_id))
+        assert r.status_code == 409, r.text
+        assert "rejected" in r.json()["detail"]
+        # the plan it came from still exports
+        assert client.get("/api/scenarios/{}/schedule.xlsx?days=14"
+                          .format(base.id)).status_code == 200
+
+        listed = {s["id"]: s for s in client.get("/api/scenarios").json()}
+        assert listed[result_id]["run_status"] == "unverified"
+        assert listed[base.id]["run_status"] is None
+        pair = client.get("/api/scenarios/{}".format(result_id)).json()["pair"]
+        assert pair["run_status"] == "unverified"
+    finally:
+        app.dependency_overrides.clear()

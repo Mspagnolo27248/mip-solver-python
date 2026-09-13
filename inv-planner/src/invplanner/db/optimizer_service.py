@@ -388,13 +388,74 @@ def _write_result_scenario(db: Session, base: Scenario, result, actor: str,
     return scenario.id
 
 
+#: Slack on top of twice a run's own time limit before a row still marked
+#: `running` is taken to have died with the server. Runs observed here end
+#: within seconds of their limit; the simulation and verification either side
+#: of the solve are what the margin is for.
+RUN_GRACE_SECONDS = 600
+
+
+def in_progress(run: OptimizerRun, now: Optional[dt.datetime] = None) -> bool:
+    """Whether a run marked `running` is really still solving.
+
+    The row is committed as `running` before the solve starts and only updated
+    when it ends, so a server stopped mid-solve leaves it `running` for ever.
+    Without a cut-off, that one row would refuse every run after it.
+    """
+    if run.status != "running":
+        return False
+    limit = float((run.params or {}).get("time_limit_seconds") or 900)
+    now = now or dt.datetime.utcnow()
+    return now - run.created_at < dt.timedelta(
+        seconds=2 * limit + RUN_GRACE_SECONDS)
+
+
+def running_run(db: Session) -> Optional[OptimizerRun]:
+    """The run still solving, if there is one.
+
+    One at a time, whatever scenario it is on. Two v2 runs on the same plan
+    were started 14 s apart - the button stayed clickable through a 15-minute
+    solve - and both ran to the limit for the same answer.
+    """
+    for run in (db.query(OptimizerRun)
+                .filter(OptimizerRun.status == "running")
+                .order_by(OptimizerRun.id.desc())):
+        if in_progress(run):
+            return run
+    return None
+
+
+def rejected_result(db: Session, scenario_id: int) -> Optional[OptimizerRun]:
+    """The run this scenario is the answer of, if the simulator rejected it.
+
+    The scenario is kept so the failure can be inspected, but a schedule the
+    simulator says cannot be executed must not reach the workbook.
+    """
+    run = (db.query(OptimizerRun)
+           .filter(OptimizerRun.result_scenario_id == scenario_id)
+           .order_by(OptimizerRun.id.desc()).first())
+    return run if run is not None and run.status == "unverified" else None
+
+
 def list_runs(db: Session, limit: int = 25) -> List[Dict[str, Any]]:
     rows = (db.query(OptimizerRun).order_by(OptimizerRun.id.desc())
             .limit(limit).all())
     names = {s.id: s.name for s in db.query(Scenario)}
+    now = dt.datetime.utcnow()
     return [{
         "id": r.id, "created_at": as_utc(r.created_at),
-        "created_by": r.created_by, "status": r.status, "message": r.message,
+        "created_by": r.created_by, "message": r.message,
+        # A row left `running` by a stopped server reads as what happened to it.
+        "status": ("interrupted" if r.status == "running"
+                   and not in_progress(r, now) else r.status),
+        "in_progress": in_progress(r, now),
+        "time_limit_seconds": (r.params or {}).get("time_limit_seconds"),
+        # What the run was solved with. The inputs are global and save the
+        # moment a box loses focus, so the screen only ever shows what the
+        # *next* run will use.
+        "settings": [{"field": f, "label": LABELS[f][0], "unit": LABELS[f][1],
+                      "value": (r.params or {}).get(f)}
+                     for f in FIELDS if f in (r.params or {})],
         "solver": r.solver, "solve_seconds": r.solve_seconds,
         "objective": r.objective, "kpis": r.kpis,
         "model_version": (r.params or {}).get("model_version") or "v0",
@@ -419,7 +480,7 @@ def pair_for(db: Session, scenario_id: int) -> Dict[str, Any]:
            .order_by(OptimizerRun.id.desc()).first())
     if run is not None:
         base = db.query(Scenario).get(run.base_scenario_id)
-        return {"role": "result", "run_id": run.id,
+        return {"role": "result", "run_id": run.id, "run_status": run.status,
                 "other_id": run.base_scenario_id,
                 "other_name": base.name if base else None,
                 "other_role": "warm start"}
@@ -429,7 +490,7 @@ def pair_for(db: Session, scenario_id: int) -> Dict[str, Any]:
            .order_by(OptimizerRun.id.desc()).first())
     if run is not None:
         result = db.query(Scenario).get(run.result_scenario_id)
-        return {"role": "warm start", "run_id": run.id,
+        return {"role": "warm start", "run_id": run.id, "run_status": run.status,
                 "other_id": run.result_scenario_id,
                 "other_name": result.name if result else None,
                 "other_role": "optimizer"}

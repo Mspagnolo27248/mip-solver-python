@@ -352,3 +352,10 @@ td.num.bad  { color: var(--danger); }
 }
 .cell-compare.differs { color: var(--warn); font-weight: 600; }
 td.cell-diff { background: var(--warn-soft); }
+
+/* ---- runs: one at a time, why each ended, and what it was given ---- */
+.btn:disabled { cursor: progress; opacity: .75; filter: none; transform: none; }
+.run-message { margin: 0; color: var(--muted); font-size: 13px; max-width: 110ch; }
+.run-message.bad { color: var(--warn); font-weight: 500; }
+.run-settings > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+td.changed { color: var(--warn); font-weight: 600; }

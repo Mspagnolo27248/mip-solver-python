@@ -355,6 +355,12 @@ def get_optimizer_runs(db: Session = Depends(get_session)) -> List[Dict[str, Any
 @app.post("/api/optimizer/run")
 def post_optimizer_run(body: OptimizeRunIn,
                        db: Session = Depends(get_session)) -> Dict[str, Any]:
+    busy = optsvc.running_run(db)
+    if busy is not None:
+        on = db.query(Scenario).get(busy.base_scenario_id)
+        raise HTTPException(409, "run {} is still solving on \"{}\" - wait for it "
+                                 "to finish before starting another".format(
+                                     busy.id, on.name if on else busy.base_scenario_id))
     p = optsvc.active_params(db)
     if p.missing():
         raise HTTPException(400, "missing optimizer inputs: {}".format(
@@ -377,7 +383,13 @@ def _scenario_dict(s: Scenario) -> Dict[str, Any]:
 
 @app.get("/api/scenarios")
 def list_scenarios(db: Session = Depends(get_session)) -> List[Dict[str, Any]]:
-    return [_scenario_dict(s) for s in
+    # The status of the run each result came from, latest run winning, so the
+    # picker can mark a schedule the simulator rejected.
+    run_status = {r.result_scenario_id: r.status for r in
+                  db.query(OptimizerRun)
+                  .filter(OptimizerRun.result_scenario_id.isnot(None))
+                  .order_by(OptimizerRun.id)}
+    return [dict(_scenario_dict(s), run_status=run_status.get(s.id)) for s in
             db.query(Scenario).order_by(Scenario.id.desc()).all()]
 
 
@@ -787,6 +799,11 @@ def export_schedule(scenario_id: int, days: int = Query(42, le=400),
     paste would flatten.
     """
     s = _get_scenario(db, scenario_id)
+    rejected = optsvc.rejected_result(db, s.id)
+    if rejected is not None:
+        raise HTTPException(409, "\"{}\" is the answer of run {}, which the "
+                                 "simulator rejected, so it is not exported: {}"
+                            .format(s.name, rejected.id, rejected.message or ""))
     ref = svc.engine_reference(db, s.reference_version_id)
     dates = [svc._d(x) for x in s.inputs["dates"]][offset:offset + days]
     if not dates:

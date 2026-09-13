@@ -17,6 +17,11 @@ const state = {
   dashGroups: null,
   dashGroup: null,
   refKind: null,
+  // The run being solved - started from this tab, or seen in the runs list.
+  running: null,
+  runPending: false,   // this tab's run request has not come back yet
+  runsSeq: 0,
+  runsPoll: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -81,16 +86,26 @@ function toast(msg) {
 }
 
 /* ------------------------------------------------------------------ boot */
-async function boot() {
+/* Rebuild the picker without changing what is selected. Finishing a run adds a
+   scenario, and the list used to be reloaded through `boot`, which selects the
+   newest - so a finished run quietly selected its own result, and the next run
+   or new scenario started from that instead of the plan. */
+async function loadScenarioList() {
   state.scenarios = await api('/api/scenarios');
   const sel = $('#scenario-select');
   sel.innerHTML = '';
-  state.scenarios.forEach((s) => sel.appendChild(el('option', { value: s.id }, s.name)));
+  state.scenarios.forEach((s) => sel.appendChild(el('option', { value: s.id },
+    s.name + (s.run_status === 'unverified' ? ' · unverified' : ''))));
+  if (state.scenario) sel.value = state.scenario.id;
+}
+
+async function boot() {
+  await loadScenarioList();
   if (!state.scenarios.length) {
     $('#scenario-meta').textContent = 'No scenario yet — create one to begin.';
     return;
   }
-  sel.value = state.scenarios[0].id;
+  $('#scenario-select').value = state.scenarios[0].id;
   await selectScenario(state.scenarios[0].id);
 }
 
@@ -115,6 +130,27 @@ async function selectScenario(id) {
   await refreshActive();
 }
 
+/* "started 8:09 PM, stops by about 8:24 PM". The stop time comes from the
+   run's own limit, which v2 runs to; greedy has none worth quoting. */
+function runClock(r) {
+  const hm = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const t0 = new Date(r.created_at);
+  if (r.model_version === 'greedy' || !r.time_limit_seconds) return `started ${hm(t0)}`;
+  const end = new Date(t0.getTime() + r.time_limit_seconds * 1000);
+  return `started ${hm(t0)}, stops by about ${hm(end)}`;
+}
+
+const runOutcome = (status) => ({
+  done: 'verified and proved optimal',
+  not_proved_optimal: 'verified, not proved optimal',
+  unverified: 'rejected by the simulator',
+}[status] || status);
+
+// A run setting as the planner reads it. Empty is 'default', as on the inputs.
+const fmtSetting = (v) => (v === null || v === undefined ? 'default'
+  : typeof v === 'boolean' ? (v ? 'on' : 'off')
+  : typeof v === 'object' ? JSON.stringify(v) : String(v));
+
 /* The run button is in one view and the scenario picker is in the page header,
    so nothing on screen told you which schedule you were about to solve. Opening
    a run's result changes the selection silently, which is how a run ended up
@@ -122,6 +158,16 @@ async function selectScenario(id) {
 function refreshRunButton() {
   const btn = $('#opt-run');
   if (!btn) return;
+  // While a run is solving the button says so and cannot start another. It used
+  // to flash "Solving…" for 2.6 s and stay clickable through the whole solve.
+  const r = state.running;
+  btn.disabled = !!r;
+  if (r) {
+    btn.classList.remove('warn');
+    btn.textContent = `Solving on “${r.base_scenario_name}” · ${runClock(r)}`;
+    btn.title = 'One run at a time - the button comes back when this one finishes';
+    return;
+  }
   const s = state.scenario;
   if (!s) {
     btn.textContent = 'Run optimizer';
@@ -810,6 +856,13 @@ function renderCompareBar(pair, compare) {
     title: 'Download the visible window as blocks that paste into the workbook',
     onclick: exportSchedule,
   }, 'Export for Excel');
+  // A schedule the simulator rejected is kept to be inspected, never exported.
+  const exportCtl = pair && pair.role === 'result' && pair.run_status === 'unverified'
+    ? el('span', {
+        class: 'pill warn',
+        title: 'The simulator rejected this schedule, so it cannot be exported',
+      }, 'unverified · not exportable')
+    : exportBtn;
   if (!pair || !pair.other_id) {
     host.replaceChildren(
       el('span', { class: 'muted' },
@@ -819,7 +872,7 @@ function renderCompareBar(pair, compare) {
   }
   const showing = state.compare;
   host.replaceChildren(
-    exportBtn,
+    exportCtl,
     el('span', { class: 'pill info' },
       pair.role === 'result' ? 'Optimizer proposal' : 'Your schedule'),
     el('button', {
@@ -1233,7 +1286,21 @@ async function saveOptParam(field, raw, isText) {
 }
 
 async function loadOptRuns() {
-  const runs = await api('/api/optimizer/runs');
+  // Numbered, because a list fetched mid-solve can land after the one fetched
+  // once the solve ended, and would put the finished run back to 'solving'.
+  const seq = ++state.runsSeq;
+  const [runs, now] = await Promise.all([
+    api('/api/optimizer/runs'), api('/api/optimizer/params')]);
+  if (seq !== state.runsSeq) return;
+  const live = runs.find((r) => r.in_progress) || null;
+  if (live) state.running = live;
+  else if (!state.runPending) state.running = null;
+  refreshRunButton();
+  // A run started in another tab, or before a reload, has no request here to
+  // wait on - look again until the list says it has ended.
+  clearTimeout(state.runsPoll);
+  if (live && !state.runPending) state.runsPoll = setTimeout(loadOptRuns, 15000);
+  const current = now.params;
   const host = $('#opt-runs');
   if (!runs.length) {
     host.replaceChildren(el('div', { class: 'empty' },
@@ -1242,6 +1309,17 @@ async function loadOptRuns() {
   }
   host.replaceChildren();
   for (const r of runs) {
+    if (r.in_progress) {
+      host.append(el('div', { class: 'card run-card' },
+        el('div', { class: 'run-head' },
+          el('h3', {}, `Run #${r.id}`),
+          el('span', { class: 'pill info' }, 'solving'),
+          el('span', { class: 'pill info' }, r.model_version || 'v0'),
+          el('span', { class: 'muted' }, `on ${r.base_scenario_name} · ${runClock(r)}`)),
+        el('p', { class: 'run-message' },
+          'Its answer lands here, and as a new scenario, when the solve ends.')));
+      continue;
+    }
     const k = r.kpis || {};
     const base = k.baseline || {};
     const opt = k.optimized || {};
@@ -1261,10 +1339,12 @@ async function loadOptRuns() {
             title: r.message || 'Feasible and verified; solver hit its time '
                  + 'limit before proving this is the best schedule.',
           }, 'verified · not proved optimal')
-        : el('span', {
-            class: 'pill ' + (r.status === 'error' ? 'danger' : 'warn'),
-            title: r.message || '',
-          }, r.status);
+        : r.status === 'interrupted'
+          ? el('span', { class: 'pill danger' }, 'interrupted')
+          : el('span', {
+              class: 'pill ' + (r.status === 'error' ? 'danger' : 'warn'),
+              title: r.message || '',
+            }, r.status);
 
     const head = el('div', { class: 'run-head' },
       el('h3', {}, `Run #${r.id}`),
@@ -1316,18 +1396,45 @@ async function loadOptRuns() {
       : el('p', { class: 'muted' },
           'v0 keeps your assignments, so there are no campaigns to report.');
 
+    // Why the run ended the way it did. This used to live only in the status
+    // pill's tooltip, where "the schedule asks units to charge feed the tanks
+    // cannot supply" was never read.
+    const why = r.status === 'interrupted'
+      ? 'The server stopped while this run was solving, so it never finished '
+        + 'and nothing was saved. Start it again.'
+      : r.message;
+    const rejected = r.status === 'unverified';
+    const whyLine = why ? el('p', {
+      class: 'run-message' + (rejected || r.status === 'error'
+        || r.status === 'interrupted' ? ' bad' : ''),
+    }, why) : null;
+
+    const used = r.settings || [];
+    const changed = used.filter((s) => fmtSetting(s.value) !== fmtSetting(current[s.field]));
+    const settings = used.length ? el('details', { class: 'run-settings' },
+      el('summary', {}, 'Settings used'
+        + (changed.length ? ` · ${changed.length} differ from the inputs now` : '')),
+      table(['Input', 'This run', 'Now'], used.map((s) => el('tr', {},
+        el('td', { class: 'sticky' }, s.label),
+        el('td', {}, fmtSetting(s.value)),
+        el('td', { class: changed.includes(s) ? 'changed' : '' },
+          fmtSetting(current[s.field])))), [0])) : null;
+
+    // A schedule the simulator rejected is kept to be inspected, never exported.
     const actions = el('div', { class: 'controls' },
       r.result_scenario_id ? el('button', {
-        class: 'btn',
-        title: 'Open the proposed schedule on the planning side',
+        class: rejected ? 'btn ghost' : 'btn',
+        title: rejected
+          ? 'Open the schedule the simulator rejected, to see what went wrong'
+          : 'Open the proposed schedule on the planning side',
         onclick: () => openResult(r.result_scenario_id),
-      }, 'Open schedule') : null,
+      }, rejected ? 'Inspect the rejected schedule' : 'Open schedule') : null,
       r.result_scenario_id ? el('button', {
         class: 'linkish',
         title: 'Open it beside the schedule it warm started from',
         onclick: () => openResult(r.result_scenario_id, r.base_scenario_id),
       }, 'Compare with my schedule') : null,
-      r.result_scenario_id ? el('button', {
+      r.result_scenario_id && !rejected ? el('button', {
         class: 'linkish',
         title: 'Download it as blocks that paste into the workbook',
         onclick: () => {
@@ -1336,13 +1443,16 @@ async function loadOptRuns() {
             + `/schedule.xlsx?days=${days}`;
         },
       }, 'Export for Excel') : null,
-      v.note ? el('span', { class: 'muted' }, v.note) : null,
+      rejected && r.result_scenario_id
+        ? el('span', { class: 'muted' }, 'Not exportable: the simulator rejected it.')
+        : null,
+      v.note && v.note !== r.message ? el('span', { class: 'muted' }, v.note) : null,
     );
 
     host.append(el('div', { class: 'card run-card' },
-      head, cmp, checks,
+      head, whyLine, cmp, checks,
       el('h4', { class: 'group-head' }, 'Campaign shape'), campaigns,
-      actions));
+      settings, actions));
   }
 }
 
@@ -1363,20 +1473,43 @@ async function runOptimizer() {
       + `re-solved. Select “${from}” — the schedule it came from — and run that.`);
     return;
   }
-  toast('Solving…');
+  if (state.running) return;
+  const base = state.scenario;
+  // The request only answers when the solve is over, so the button shows the
+  // run as solving now, from the inputs it is about to use. The server's own
+  // row replaces this as soon as the runs list has it.
+  const { params } = await api('/api/optimizer/params');
+  state.running = {
+    base_scenario_name: base.name, created_at: new Date().toISOString(),
+    time_limit_seconds: params.time_limit_seconds, model_version: params.model_version,
+  };
+  state.runPending = true;
+  refreshRunButton();
+  const request = api('/api/optimizer/run', {
+    method: 'POST',
+    body: JSON.stringify({ scenario_id: base.id }),
+  });
+  // the run row is committed before the solve starts, so the list can show it
+  setTimeout(() => { if (state.runPending) loadOptRuns(); }, 1500);
+  let run = null;
   try {
-    await api('/api/optimizer/run', {
-      method: 'POST',
-      body: JSON.stringify({ scenario_id: state.scenario.id }),
-    });
-  } catch (e) { return; }
-  toast('Run finished');
+    run = await request;
+  } catch (e) {
+    // api() has shown why - a refusal, or another run still solving
+  }
+  state.runPending = false;
+  state.running = null;
+  // Adds the new result to the picker without selecting it: the plan the run
+  // started from stays selected, so the next run starts from it too.
+  await loadScenarioList();
   await loadOptRuns();
-  await boot();
+  if (run && run.id) {
+    toast(`Run #${run.id} finished: ${runOutcome(run.status)}. Its card is at the top.`);
+  }
 }
 
 async function openResult(scenarioId, compareWith) {
-  await boot();
+  await loadScenarioList();
   $('#scenario-select').value = scenarioId;
   state.compare = compareWith != null;
   await selectScenario(scenarioId);
@@ -1495,7 +1628,7 @@ async function newScenario() {
     }),
   });
   toast(`Scenario "${s.name}" created from the current source data`);
-  await boot();
+  await loadScenarioList();
   $('#scenario-select').value = s.id;
   await selectScenario(s.id);
 }

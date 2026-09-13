@@ -51,7 +51,7 @@ This is the question a planner most often can't answer from the screen.
 | Charge schedule, crude rate and mode, planned downtime | Charge schedule | This scenario | Straight away; each cell saves when you leave it |
 | Opening inventory, orders and forecast inside a scenario | Nowhere | This scenario, frozen when it was created | Can't be edited. Make a new scenario |
 | Plan date (`as_of`) and horizon (366 days) | The New scenario prompt only | This scenario | Can't be changed after creation. There is no delete in the UI either |
-| Optimizer runs | Runs & results | One global list, last 25, not filtered by scenario | Each result lands as a new scenario with status `proposed` |
+| Optimizer runs | Runs & results | One global list, last 25, not filtered by scenario; one run at a time | Each result lands as a new scenario with status `proposed` |
 
 ⚠ The header scenario picker stays visible on the three global tabs: Source data,
 Model inputs and Optimizer inputs.
@@ -91,7 +91,6 @@ flowchart LR
   SCHED -- "Switch to warm start / optimizer<br/>changes scenario" --> SCHED
   FEEDS -- "Create scenario from source data<br/>same handler" --> NEW
   NEW -- "selects the new scenario" --> PICK
-  RUNS -- "after Run optimizer<br/>selects the newest scenario" --> PICK
 ```
 
 **Links between screens only go one way.** Alerts and Dashboards lead to Inventory
@@ -138,7 +137,8 @@ change that" confusion comes from.
 | Choosing a scenario | The projection product resets to the first product. Schedule "From day" options are rebuilt. The fill range resets to the whole horizon. The compare setting, dashboard group, stream and window pickers carry over. The current tab reloads | The meta line changes |
 | Switching mode | The other mode's tabs hide, and the first tab of this mode opens | The tab highlight |
 | Clicking an alert row or chart card | Inventory projection opens with that product selected | Nothing |
-| **A run finishing** (`runOptimizer`) | The runs list reloads. Then `boot()` selects the newest scenario: normally the new result, or if the run made no result, whatever is newest. The run button now names the result and turns amber | ⚠ Only the "Run finished" toast |
+| **A run starting** (`runOptimizer`) | The run button is disabled and reads "Solving on *plan* · started …, stops by about …"; a "solving" card heads the runs list. The server refuses another run until this one ends (409). A row left `running` by a stopped server stops counting after twice its time limit plus ten minutes, and reads "interrupted" | The button and the card |
+| **A run finishing** | The runs list and the picker reload. The plan the run started from **stays selected** (`loadScenarioList`) | "Run #N finished: *outcome*. Its card is at the top." |
 | Open schedule / Compare with my schedule | Reloads the scenario list, selects the result, switches to Planning, opens Charge schedule. Compare is on only for "Compare with my schedule" | A toast |
 | Switch to *warm start* / *optimizer* (compare bar) | Selects the other half of the pair, and ⚠ **turns compare off** | A toast |
 | New scenario created | Reloads the list, selects the new scenario, stays on the current tab | "Scenario X created from the current source data" (⚠ doesn't mention the copied grid) |
@@ -178,7 +178,7 @@ their head because the screen doesn't show it. That column is the one to audit.
 | 1 | Planning → Charge schedule → Planned downtime | Checks or adds outages | This scenario | ⚠ "Set these before running the optimizer" is written in the other mode |
 | 2 | Header picker | Selects a plan, not a result | - | The run button names it, and turns amber for a result |
 | 3 | Optimizer → Optimizer inputs | Model, horizon, prices, time limit | **Global**: every future run | A value the server rejects is replaced by the stored value, with the error in a toast (`saveOptParam`) |
-| 4 | Runs & results | Run optimizer on "X" | New run, and a new result scenario | ⚠ The request waits for the whole solve (up to the time limit, 900 s has been used). The "Solving…" toast lasts 2.6 s, the button stays clickable, and nothing shows it is still running |
+| 4 | Runs & results | Run optimizer on "X" | New run, and a new result scenario | The button is disabled for the whole solve and says when the run started and when it stops; a card marks it solving, and a second run is refused |
 | 5 | Runs & results | Reads the new card: status pill, schedule comparison, the four checks, campaign shape | - | "verified · not proved optimal" is the good result. ⚠ A proved-optimal run shows the same green "verified" |
 | 6 | Runs & results | Compare with my schedule | Changes mode, scenario and tab | |
 | 7 | Charge schedule compare bar | Hide / Switch to warm start | Changes scenario | ⚠ "warm start" is code vocabulary, and Switch turns compare off |
@@ -226,7 +226,7 @@ the full total. Nothing says "showing 800 of N".
 | Override / reset a model input | Model inputs detail | **All scenarios** | No | reset | Toast |
 | Change an optimizer input | Optimizer inputs | **All future runs** | No | Retype | "Saved" |
 | New scenario / Create scenario from source data | Header, Source data | New scenario | Two `prompt()`s | **None: no delete in the UI** | Toast |
-| Run optimizer | Runs & results | New run + new scenario | No | None | Two toasts |
+| Run optimizer | Runs & results | New run + new scenario | No | None | Disabled button and a "solving" card, then a toast naming the outcome |
 | Export for Excel | Compare bar, run card | None (download) | No | - | Toast on the compare bar only |
 
 Nothing has undo. Only two actions confirm first, and they use native dialogs. The
@@ -309,7 +309,13 @@ only what is shown.
     from *base*".
   - A comparison table: Your schedule / Optimizer / Change.
   - Four checks, then campaign shape.
-  - Actions: Open schedule, Compare with my schedule, Export for Excel. ⚠ The same
-    three appear on unverified runs.
-  - The reason a run is unverified or not proved optimal is only in the status pill's
-    tooltip.
+  - The run's message is on the card: why it is unverified, or why it is not proved
+    optimal.
+  - "Settings used" (collapsed) lists the optimizer inputs the run was given, next to
+    the inputs now, and counts the ones that differ.
+  - Actions: Open schedule, Compare with my schedule, Export for Excel.
+  - An unverified run offers "Inspect the rejected schedule" and no export. The export
+    endpoint refuses it too, the picker adds "· unverified" to its name, and its
+    compare bar shows "unverified · not exportable" instead of Export for Excel.
+  - A run still solving shows a short "solving" card. A run left `running` by a
+    stopped server shows as "interrupted".
