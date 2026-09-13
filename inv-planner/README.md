@@ -79,9 +79,11 @@ Useful flags:
    across the window** writes one rate onto every day in a range, which is how a
    plan is laid down rather than corrected: put the crude, ROSE and Platformer
    rates across the whole horizon, then clear MEK and extraction and let the
-   optimizer schedule them. It skips days a unit is down, and setting a rate on
-   one line clears the other lines on that unit, because a unit runs one feed at
-   a time. "Only days the unit is idle" fills the blank tail of a schedule
+   optimizer schedule them. It skips days a unit is down. On MEK, extraction and
+   ROSE, which run one feed at a time, a rate set on one line clears the unit's
+   other lines on those days; on the Platformer, the hydrotreater and the
+   transfers, where several lines run on one day, the others are left alone.
+   "Only days the unit is idle" fills the blank tail of a schedule
    without touching the stretch it already covers, which is what a rolling plan
    needs.
 
@@ -93,8 +95,8 @@ Useful flags:
    See `optimizer/v2.py`.
 6. **Source data** — the six feeds. Type in an Override column to correct a value;
    press "Sync this feed" and watch the override survive. Upload today's
-   inventory, open orders or forecast here too, then "Create scenario from
-   source data" to plan on them.
+   inventory, open orders or forecast here too, then *New Current Plan…* to
+   plan on them.
 
 The product families are defined in `src/invplanner/groups.py` as plain lists of
 product codes — edit them there if a product belongs somewhere else. Anything not

@@ -177,7 +177,7 @@
       </div>
     </div>
     <div class="card">
-      <details class="collapsible">
+      <details class="collapsible" id="downtime-panel">
         <summary>
           <span class="collapsible-mark" aria-hidden="true"></span>
           <span>
@@ -203,7 +203,7 @@
           <span class="collapsible-mark" aria-hidden="true"></span>
           <span>
             <h3>Set a rate across the window</h3>
-            <p class="muted">Writes one rate onto every day in the range. This is how a plan is laid down from scratch — set the crude, ROSE and Platformer rates for the whole window, then clear the units you want the optimizer to schedule for you. Days a unit is down are skipped, and setting a rate on one line clears the other lines on that unit, since a unit runs one feed at a time.</p>
+            <p class="muted">Writes one rate onto every day in the range. This is how a plan is laid down from scratch — set the crude, ROSE and Platformer rates for the whole window, then clear the units you want the optimizer to schedule for you. Days a unit is down are skipped. On MEK, extraction and ROSE, which run one feed at a time, a rate set on one line clears the unit's other lines on those days; on the Platformer, the hydrotreater and the transfers the other lines are left as they are.</p>
           </span>
         </summary>
         <div class="feed-detail-head">
@@ -219,7 +219,7 @@
             </label>
             <label class="field"><span>From</span><input id="fill-start" type="date"></label>
             <label class="field"><span>To</span><input id="fill-end" type="date"></label>
-            <label class="check" title="A day another line of the unit is already scheduled on is not a gap — the unit runs one feed at a time. Use this to fill the tail of a copied schedule without touching the part it covers."><input type="checkbox" id="fill-empty-only"><span>Only days the unit is idle</span></label>
+            <label class="check" title="A day another line of the unit is already scheduled on is not a gap. Use this to fill the tail of a copied schedule without touching the part it covers."><input type="checkbox" id="fill-empty-only"><span>Only days the unit is idle</span></label>
             <button id="fill-apply" class="btn">Apply</button>
           </div>
         </div>
@@ -323,6 +323,20 @@
     </div>
   </section>
 </main>
+
+<!-- ASK FIRST: bulk writes and deletes confirm here, not with window.confirm() -->
+<dialog id="confirm" class="dialog" aria-labelledby="confirm-title">
+  <form method="dialog">
+    <div>
+      <h2 id="confirm-title"></h2>
+      <p class="muted" id="confirm-body"></p>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn ghost" id="confirm-cancel">Cancel</button>
+      <button type="submit" class="btn" id="confirm-ok" value="ok">OK</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- NEW CURRENT PLAN: one form, opened by both New Current Plan buttons -->
 <dialog id="new-plan" class="dialog" aria-labelledby="new-plan-title">

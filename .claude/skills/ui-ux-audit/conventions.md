@@ -99,10 +99,14 @@ Decided by the user after the plan and optimizer audit
       - The cell shows a brief "saved" mark.
       - On failure, the stored value is put back and the box keeps a red outline
         with the reason.
-      - A schedule grid refreshes after every cell edit.
+      - The cells a save changed are updated where they are, so the focus stays in
+        the cell the planner tabbed to; a refused save redraws. A table that has
+        to redraw puts the focus back (`holdFocus`).
       - Every number box has the scroll-wheel guard.
-      - A single-cell charge edit follows the same one-feed-per-unit rule as Set a
-        rate, and says what it cleared.
+      - *Dropped 2026-09-13:* a typed charge cell does not clear the unit's other
+        lines. Several lines on one day is normal on the Platformer, HYDRO and the
+        transfers, and on a changeover day anywhere. Set a rate clears them only on
+        MEK, EXTRACT and ROSE (`cfg.ONE_FEED_UNITS`), decided the same day.
     - **Single clicks that remove something** (remove downtime, clear, reset)
       happen immediately, with **Undo** in the toast for a few seconds. They don't
       ask first. Toggles that undo themselves (Down, R/L mode) stay as they are.
@@ -152,8 +156,8 @@ The plan and optimizer leads were settled by
 `docs/ui-audits/2026-09-12-plan-and-optimizer.md`, and their findings live there now.
 These are still open, either outside that audit's scope or not yet seen on screen:
 
-- **Model inputs scope.** The scenario picker stays visible on Model inputs, and its
-  "projections recalculated" toast doesn't say that every scenario changes. S2.
+- **Model inputs scope.** The scenario picker stays visible on Model inputs, which is
+  not scoped to a scenario. Its messages now say every plan is recalculated. S2.
 - **Same-looking boxes, different reach.** A feed override reaches no existing
   scenario; a model-input override reaches all of them immediately. S2.
 - **Feed table cap.** The feed table loads at most 800 rows while its heading shows the

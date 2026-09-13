@@ -77,12 +77,103 @@ async function api(path, opts) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+/* A message, with at most one action - Undo, or "Open it". With an action it
+   stays up long enough to reach the button. */
+function toast(msg, action) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.replaceChildren(el('span', {}, msg));
+  if (action) {
+    t.append(el('button', {
+      class: 'toast-action',
+      onclick: () => { t.hidden = true; clearTimeout(toastTimer); action.run(); },
+    }, action.label));
+  }
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { t.hidden = true; }, action ? 8000 : 2600);
+}
+
+/* The reason a request was refused, in words. api() throws the response body,
+   which from FastAPI is JSON with a `detail`. */
+function errorText(e) {
+  try {
+    const d = JSON.parse(e.message).detail;
+    return typeof d === 'string' ? d : JSON.stringify(d);
+  } catch (_) {
+    return e.message;
+  }
+}
+
+/* ---------------------------------------------------------------- saving */
+/* Every box that saves when it loses focus carries `data-save`, a key naming what
+   it holds, so it can be found again after a redraw and show what became of its
+   value: a green mark that fades when it saved, and a red outline with the reason
+   when it did not (convention 14). */
+const saveBox = (key) => document.querySelector(`[data-save="${CSS.escape(key)}"]`);
+
+function markSaved(key, ok, reason) {
+  const box = saveBox(key);
+  if (!box) return;
+  box.classList.remove('saved', 'save-failed');
+  void box.offsetWidth;                 // restart the mark if it is still showing
+  if (ok) {
+    box.classList.add('saved');
+    setTimeout(() => box.classList.remove('saved'), 1600);
+    return;
+  }
+  const title = box.title;
+  box.classList.add('save-failed');
+  box.title = `Not saved: ${reason}`;
+  box.addEventListener('input', () => {
+    box.classList.remove('save-failed');
+    box.title = title;
+  }, { once: true });
+}
+
+/* Redrawing a table replaces its boxes, including the one the planner has just
+   tabbed into. Put the focus back after the redraw, with anything already typed
+   there, and save that value when the box is left, as it would have been. */
+function holdFocus() {
+  const was = document.activeElement;
+  const key = was && was.dataset ? was.dataset.save : null;
+  if (!key) return () => {};
+  const typed = was.value;
+  return () => {
+    const box = saveBox(key);
+    if (!box || box === was) return;
+    const stored = box.value;
+    if (typed !== stored) {
+      box.value = typed;
+      let changed = false;
+      box.addEventListener('change', () => { changed = true; }, { once: true });
+      box.addEventListener('blur', () => {
+        if (!changed && box.value !== stored) box.dispatchEvent(new Event('change'));
+      }, { once: true });
+    }
+    box.focus();
+  };
+}
+
+async function redrawKeepingFocus(redraw) {
+  const restore = holdFocus();
+  await redraw();
+  restore();
+}
+
+/* Asks first, in the page, before anything that writes many days or deletes
+   (convention 14). window.confirm() said one line, looked like the browser rather
+   than the app, and froze the page until it was answered. True for OK. */
+function askConfirm({ title, body, ok }) {
+  const dlg = $('#confirm');
+  $('#confirm-title').textContent = title;
+  $('#confirm-body').textContent = body;
+  $('#confirm-ok').textContent = ok;
+  dlg.returnValue = '';
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    dlg.showModal();
+    $('#confirm-ok').focus();
+  });
 }
 
 /* ------------------------------------------------------------------ boot */
@@ -124,6 +215,7 @@ async function boot() {
 }
 
 async function selectScenario(id) {
+  warnUnappliedPanels();
   state.scenario = await api(`/api/scenarios/${id}`);
   const s = state.scenario;
   // Say which kind is selected: nothing on screen told a plan from a result.
@@ -610,6 +702,7 @@ async function loadSchedule() {
   const q = `days=${days}&offset=${offset}`
     + (state.compare && pair.other_id ? `&compare=${pair.other_id}` : '');
   const d = await api(`/api/scenarios/${state.scenario.id}/schedule?${q}`);
+  state.schedUnits = d.units;   // Set a rate reads which units clear their siblings
   renderCompareBar(pair, d.compare);
 
   const head = ['Unit / charge product', ...d.dates.map(shortDate)];
@@ -621,6 +714,7 @@ async function loadSchedule() {
       el('input', {
         class: 'cell-input' + (c.bbl ? ' on' : ''), type: 'number', value: c.bbl || '',
         title: `Crude charge ${iso}`,
+        'data-save': `crude|${iso}`,
         onchange: (e) => editCrude(iso, parseFloat(e.target.value) || 0, null),
       }));
   });
@@ -671,6 +765,7 @@ async function loadSchedule() {
           el('input', {
             class: 'cell-input' + (v ? ' on' : ''), type: 'number', value: v || '',
             disabled: isDown,
+            'data-save': `sched|${lineRow.key}|${iso}`,
             title: isDown
               ? `${unit.unit} is down on ${iso}`
               : `${lineRow.code} ${lineRow.name} · ${iso}`
@@ -759,11 +854,32 @@ async function applyFill() {
   if (end && start && end < start) { toast('End date is before the start date'); return; }
   const mode = target === 'CRUDE' ? ($('#fill-mode').value || null) : null;
   // Overwriting hundreds of cells is not undoable from here, so the one thing
-  // that is easy to get wrong - the range - is read back before it happens.
+  // that is easy to get wrong - the range - is read back before it happens,
+  // with what else the write touches. In the page, not window.confirm().
+  const unit = target === 'CRUDE' ? null : target.split('#')[0];
+  const label = target === 'CRUDE' ? 'the crude charge'
+    : wholeUnit ? `every line on ${target}`
+      : $('#fill-target').selectedOptions[0].textContent;
   const what = bbl
-    ? `set ${target} to ${fmt(bbl)} bbl/day`
-    : `clear ${target}`;
-  if (!window.confirm(`${what} on every day from ${start} to ${end}?`)) return;
+    ? `set ${label} to ${fmt(bbl)} bbl/day`
+    : `clear ${label}`;
+  const days = daysBetween(start, end) + 1;
+  const oneFeed = ((state.schedUnits || []).find((u) => u.unit === unit) || {}).one_feed;
+  const ok = await askConfirm({
+    title: 'Set a rate across the window',
+    body: `${what[0].toUpperCase()}${what.slice(1)} on every day from ${start} to ${end}, `
+      + `${plural(days, 'day')}.`
+      + (bbl && unit ? ' Days the unit is down are skipped.' : '')
+      + (bbl && unit && !wholeUnit
+        ? (oneFeed
+          ? ` ${unit} runs one feed at a time, so its other lines are cleared on the days written.`
+          : ` ${unit}'s other lines are left as they are.`)
+        : '')
+      + (bbl && $('#fill-empty-only').checked ? ' Only days the unit is idle are written.' : '')
+      + " This can't be undone.",
+    ok: bbl ? `Write ${plural(days, 'day')}` : `Clear ${plural(days, 'day')}`,
+  });
+  if (!ok) return;
 
   const r = await api(`/api/scenarios/${state.scenario.id}/schedule/fill`, {
     method: 'POST',
@@ -780,6 +896,7 @@ async function applyFill() {
   $('#fill-note').textContent =
     `${what} · ${r.start} to ${r.end} · ${bits.join(' · ')}`;
   toast(bits.join(' · '));
+  $('#fill-panel').dataset.dirty = '';
   loadSchedule();
 }
 
@@ -815,7 +932,7 @@ function drawDowntime(d) {
         }, 'detected')
       : el('span', { class: 'pill ok' }, 'confirmed')),
     el('td', {}, el('button', {
-      class: 'linkish', onclick: () => removeDowntime(wnd.id),
+      class: 'linkish', onclick: () => removeDowntime(wnd),
     }, 'remove')),
   ));
   host.replaceChildren(table(
@@ -843,13 +960,30 @@ async function addDowntime() {
   });
   toast(`${unit} down ${start} to ${end}`);
   $('#dt-reason').value = '';
+  $('#downtime-panel').dataset.dirty = '';
   loadSchedule();
 }
 
-async function removeDowntime(id) {
-  await api(`/api/scenarios/${state.scenario.id}/downtime/${id}`,
-    { method: 'DELETE' });
-  toast('Downtime removed');
+/* Removed at once, with Undo: a single click that removes asks nothing first,
+   but it can be taken back (convention 14). Undo puts the window back as it
+   was - detected or confirmed - on the plan it was removed from. */
+async function removeDowntime(wnd) {
+  const sid = state.scenario.id;
+  await api(`/api/scenarios/${sid}/downtime/${wnd.id}`, { method: 'DELETE' });
+  toast(`Removed ${wnd.unit} downtime, ${wnd.start} to ${wnd.end}`, {
+    label: 'Undo',
+    run: async () => {
+      await api(`/api/scenarios/${sid}/downtime`, {
+        method: 'POST',
+        body: JSON.stringify({
+          unit: wnd.unit, start: wnd.start, end: wnd.end,
+          reason: wnd.reason || '', status: wnd.status,
+        }),
+      });
+      toast(`${wnd.unit} downtime ${wnd.start} to ${wnd.end} put back`);
+      if (state.scenario && state.scenario.id === sid) loadSchedule();
+    },
+  });
   loadSchedule();
 }
 
@@ -919,30 +1053,59 @@ function renderCompareBar(pair, compare) {
   );
 }
 
+/* A cell is updated where it is rather than the grid redrawn: a redraw would
+   take the focus from the cell the planner has just tabbed into. A refused save
+   redraws, to put the stored value back beside the reason. Other lines on the
+   unit that day are left alone - several at once is normal on the Platformer,
+   HYDRO and the transfers, and on a changeover day anywhere. */
 async function editSchedule(lineKey, date, bbl) {
+  const key = `sched|${lineKey}|${date}`;
   try {
     await api(`/api/scenarios/${state.scenario.id}/schedule`, {
       method: 'PATCH',
       body: JSON.stringify({ line_key: lineKey, date, bbl }),
     });
   } catch (e) {
-    loadSchedule();  // refused: put the stored value back (see saveOptParam)
+    await redrawKeepingFocus(loadSchedule);
+    markSaved(key, false, errorText(e));
     return;
   }
-  toast(`Saved ${bbl.toLocaleString()} bbl · projection re-simulated`);
+  const box = saveBox(key);
+  if (box) {
+    box.classList.toggle('on', !!bbl);
+    if (!bbl) box.value = '';
+  }
+  // Comparing, the count of cells that differ and the marks under them move.
+  if (state.compare) await redrawKeepingFocus(loadSchedule);
+  markSaved(key, true);
+  toast(`Saved ${fmt(bbl)} bbl · projection re-simulated`);
 }
 
 async function editCrude(date, bbl, mode) {
+  const key = `crude|${date}`;
   try {
     await api(`/api/scenarios/${state.scenario.id}/crude`, {
       method: 'PATCH',
       body: JSON.stringify({ date, bbl, mode }),
     });
-    toast(mode ? `Crude mode ${mode} on ${date}` : `Crude charge saved`);
   } catch (e) {
-    // refused - the redraw below puts the stored value back
+    await redrawKeepingFocus(loadSchedule);
+    if (bbl !== null) markSaved(key, false, errorText(e));
+    return;
   }
-  loadSchedule();
+  if (mode) {
+    // the mode button takes its next value from the grid, so this one redraws
+    toast(`Crude mode ${mode} on ${date}`);
+    await redrawKeepingFocus(loadSchedule);
+    return;
+  }
+  const box = saveBox(key);
+  if (box) {
+    box.classList.toggle('on', !!bbl);
+    if (!bbl) box.value = '';
+  }
+  markSaved(key, true);
+  toast(`Crude charge saved: ${fmt(bbl)} bbl on ${date}`);
 }
 
 /* ----------------------------------------------------------------- feeds */
@@ -1021,8 +1184,15 @@ async function uploadSheet(kind, file, input) {
 }
 
 async function clearUpload(kind) {
-  if (!confirm('Delete the uploaded file and read this feed from the planning '
-    + 'workbook again? Your overrides are kept either way.')) return;
+  const k = (state.uploads || []).find((u) => u.kind === kind);
+  const ok = await askConfirm({
+    title: `Read ${k ? k.title : 'this feed'} from the workbook`,
+    body: 'Deletes the uploaded file and reads this feed from the planning workbook '
+      + 'again. Your overrides are kept. To go back, upload the file again. Existing '
+      + 'plans keep the numbers they were created with.',
+    ok: 'Delete the upload',
+  });
+  if (!ok) return;
   await api(`/api/feeds/upload/${kind}`, { method: 'DELETE' });
   toast('Back on the workbook seed for this feed');
   await loadFeeds();
@@ -1058,6 +1228,7 @@ async function loadFeedRows() {
         type: 'number', step: 'any',
         value: r.override_value === null ? '' : r.override_value,
         placeholder: '—',
+        'data-save': `feed|${r.id}`,
         onchange: (e) => saveOverride(r.id, e.target.value),
       })),
     el('td', { class: 'num' }, el('b', {}, fmt(r.effective_value, 2))),
@@ -1066,7 +1237,7 @@ async function loadFeedRows() {
         : r.has_override ? el('span', { class: 'pill info' }, 'overridden') : ''),
     el('td', {}, r.override_by || ''),
     el('td', {}, r.has_override
-      ? el('button', { class: 'linkish', onclick: () => saveOverride(r.id, '') }, 'clear')
+      ? el('button', { class: 'linkish', onclick: () => clearOverride(r) }, 'clear')
       : ''),
   ));
 
@@ -1077,6 +1248,7 @@ async function loadFeedRows() {
 }
 
 async function saveOverride(id, raw) {
+  const key = `feed|${id}`;
   const value = raw === '' || raw === null ? null : parseFloat(raw);
   try {
     await api(`/api/staging/${id}`, {
@@ -1084,12 +1256,33 @@ async function saveOverride(id, raw) {
       body: JSON.stringify({ value, reason: 'edited in planner', actor: 'planner' }),
     });
   } catch (e) {
-    await loadFeedRows();  // refused: put the stored value back (see saveOptParam)
+    await redrawKeepingFocus(loadFeedRows);  // refused: put the stored value back
+    markSaved(key, false, errorText(e));
     return;
   }
   toast(value === null ? 'Override cleared' : `Override saved (${fmt(value, 2)})`);
+  await redrawKeepingFocus(loadFeeds);     // the cards' counts, then the rows
+  markSaved(key, true);
+}
+
+/* The clear link: one click that removes an override, done at once with Undo
+   (convention 14). Undo puts the planner's value back. */
+async function clearOverride(r) {
+  const patch = (value, reason) => api(`/api/staging/${r.id}`, {
+    method: 'PATCH', body: JSON.stringify({ value, reason, actor: 'planner' }),
+  });
+  await patch(null, 'cleared in planner');
   await loadFeeds();
-  await loadFeedRows();
+  const what = `${r.k1}${r.k2 ? ` ${r.k2}` : ''}`;
+  toast(`Override on ${what} cleared - back to the source value`, {
+    label: 'Undo',
+    run: async () => {
+      await patch(r.override_value, 'undo in planner');
+      toast(`Override on ${what} put back (${fmt(r.override_value, 2)})`);
+      await loadFeeds();
+      markSaved(`feed|${r.id}`, true);
+    },
+  });
 }
 
 /* --------------------------------------------------------- model inputs */
@@ -1151,6 +1344,7 @@ async function loadReferenceRows() {
         value: r.override_value === null ? '' : r.override_value,
         placeholder: '—',
         title: 'Leave blank to use the imported value',
+        'data-save': `ref|${r.k1}|${r.k2 || ''}`,
         onchange: (e) => saveReference(r.k1, r.k2, e.target.value),
       })),
     el('td', { class: 'num' }, el('b', {},
@@ -1161,7 +1355,7 @@ async function loadReferenceRows() {
     el('td', {}, r.override_by || ''),
     el('td', {}, r.edited
       ? el('button', {
-          class: 'linkish', onclick: () => saveReference(r.k1, r.k2, ''),
+          class: 'linkish', onclick: () => resetReference(r),
         }, 'reset')
       : ''),
   ));
@@ -1173,6 +1367,7 @@ async function loadReferenceRows() {
 }
 
 async function saveReference(k1, k2, raw) {
+  const key = `ref|${k1}|${k2 || ''}`;
   const value = raw === '' || raw === null ? null : parseFloat(raw);
   try {
     await api(`/api/reference/${state.refKind}`, {
@@ -1180,14 +1375,39 @@ async function saveReference(k1, k2, raw) {
       body: JSON.stringify({ k1, k2, value, reason: 'edited in planner' }),
     });
   } catch (e) {
-    await loadReferenceRows();  // refused: put the stored value back (see saveOptParam)
+    await redrawKeepingFocus(loadReferenceRows);  // refused: put the stored value back
+    markSaved(key, false, errorText(e));
     return;
   }
+  // A model input reaches every plan at once, so the message says so.
   toast(value === null
-    ? 'Reset to the imported value — projections recalculated'
-    : `Saved ${value} — projections recalculated`);
+    ? 'Reset to the imported value - every plan recalculated'
+    : `Saved ${value} - every plan recalculated`);
+  await redrawKeepingFocus(loadReference);   // the group counts, then the rows
+  markSaved(key, true);
+}
+
+/* The reset link: done at once with Undo (convention 14). Undo puts the edit
+   back. */
+async function resetReference(r) {
+  const kind = state.refKind;
+  const patch = (value, reason) => api(`/api/reference/${kind}`, {
+    method: 'PATCH', body: JSON.stringify({ k1: r.k1, k2: r.k2, value, reason }),
+  });
+  await patch(null, 'reset in planner');
   await loadReference();
-  await loadReferenceRows();
+  const what = `${r.k1}${r.k2 ? ` ${r.k2}` : ''}`;
+  toast(`${what} reset to the imported value - every plan recalculated`, {
+    label: 'Undo',
+    run: async () => {
+      await patch(r.override_value, r.reason || 'undo in planner');
+      toast(`${what} edit put back (${r.override_value}) - every plan recalculated`);
+      if (state.refKind === kind) {
+        await loadReference();
+        markSaved(`ref|${r.k1}|${r.k2 || ''}`, true);
+      }
+    },
+  });
 }
 
 /* ---------------------------------------------------------- optimizer */
@@ -1254,6 +1474,7 @@ async function loadOptParams() {
       const input = choices
         ? el('select', {
             class: 'ovr-input set',
+            'data-save': `opt|${field}`,
             onchange: (e) => saveOptParam(field, e.target.value, true),
           },
           Object.entries(choices).map(([opt, label]) => el('option',
@@ -1266,6 +1487,7 @@ async function loadOptParams() {
             type: 'number', step: 'any',
             value: blank ? '' : v,
             placeholder: needed ? 'required' : (blank ? 'default' : ''),
+            'data-save': `opt|${field}`,
             onchange: (e) => saveOptParam(field, e.target.value),
           });
       return el('tr', {},
@@ -1296,15 +1518,17 @@ async function loadOptParams() {
    while the next run quietly uses the old value. */
 async function saveOptParam(field, raw, isText) {
   const value = isText ? raw : (raw === '' ? null : parseFloat(raw));
+  let refused = null;
   try {
     await api('/api/optimizer/params', {
       method: 'PATCH', body: JSON.stringify({ [field]: value }),
     });
-    toast('Saved');
+    toast('Saved - every run from now on uses it');
   } catch (e) {
-    // refused - fall through and redraw what is stored
+    refused = errorText(e);
   }
-  loadOptParams();
+  await redrawKeepingFocus(loadOptParams);   // what is stored, whichever way it went
+  markSaved(`opt|${field}`, !refused, refused);
 }
 
 async function loadOptRuns() {
@@ -1558,6 +1782,7 @@ function setMode(mode) {
 }
 
 function switchTab(view) {
+  if (activeView() === 'schedule' && view !== 'schedule') warnUnappliedPanels();
   document.querySelectorAll('.tabs button').forEach((b) =>
     b.classList.toggle('active', b.dataset.view === view));
   document.querySelectorAll('.view').forEach((v) =>
@@ -1600,6 +1825,40 @@ $('#sched-offset').addEventListener('change', loadSchedule);
 $('#fill-target').addEventListener('change', fillTargetChanged);
 $('#fill-apply').addEventListener('click', applyFill);
 $('#dt-add').addEventListener('click', addDowntime);
+
+/* A panel filled in and left without Add or Apply writes nothing, and nothing
+   said so (convention 14). Typing in one marks it; Add or Apply clears the mark;
+   leaving it marked - closing the panel, or changing tab or plan - says so, with
+   a way back to it. */
+const PANELS = [
+  ['#downtime-panel', 'the downtime you filled in was not added'],
+  ['#fill-panel', 'the rate you filled in was not applied'],
+];
+PANELS.forEach(([sel]) => {
+  const panel = $(sel);
+  panel.querySelectorAll('input, select').forEach((f) =>
+    f.addEventListener('input', () => { panel.dataset.dirty = '1'; }));
+  panel.addEventListener('toggle', () => { if (!panel.open) warnUnappliedPanels(); });
+});
+
+function warnUnappliedPanels() {
+  const left = PANELS.filter(([sel]) => $(sel).dataset.dirty);
+  if (!left.length) return;
+  left.forEach(([sel]) => { $(sel).dataset.dirty = ''; });
+  const msg = left.map(([, m]) => m).join(', and ');
+  const first = left[0][0];
+  toast(`${msg[0].toUpperCase()}${msg.slice(1)} - nothing was written.`, {
+    label: 'Open it',
+    run: () => {
+      setMode('planning');
+      switchTab('schedule');
+      $(first).open = true;
+      $(first).scrollIntoView({ block: 'nearest' });
+    },
+  });
+}
+
+$('#confirm-cancel').addEventListener('click', () => $('#confirm').close(''));
 $('#ref-search').addEventListener('input', debounce(loadReferenceRows, 250));
 $('#ref-edited-only').addEventListener('change', loadReferenceRows);
 $('#opt-run').addEventListener('click', runOptimizer);
@@ -1608,13 +1867,34 @@ document.querySelectorAll('#mode-switch button').forEach((b) =>
 setMode('planning');
 $('#feed-search').addEventListener('input', debounce(loadFeedRows, 250));
 $('#feed-filter').addEventListener('change', loadFeedRows);
+/* Both syncs replace a feed's source values wholesale, so they ask first, in the
+   page (convention 14). */
+const SYNC_EFFECT = 'Your overrides are kept, and one whose source value moves is '
+  + 'flagged stale. Existing plans keep the numbers they were created with; only '
+  + 'new Current Plans use the result.';
 $('#feed-sync').addEventListener('click', async () => {
+  const meta = (state.feeds || []).find((f) => f.feed === state.feed);
+  const ok = await askConfirm({
+    title: `Sync ${meta ? meta.title : 'this feed'}`,
+    body: 'Reads this feed again from its source - the uploaded file, or the planning '
+      + `workbook if none is uploaded - and replaces its source values. ${SYNC_EFFECT}`,
+    ok: 'Sync this feed',
+  });
+  if (!ok) return;
   const r = await api(`/api/feeds/${state.feed}/sync`, { method: 'POST' });
   toast(`Synced ${r.rows} rows — overrides preserved`);
   await loadFeeds();
   await loadFeedRows();
 });
 $('#sync-all').addEventListener('click', async () => {
+  const ok = await askConfirm({
+    title: 'Re-sync all feeds',
+    body: 'Reads every feed again from its source - uploaded files where there are '
+      + 'any, the planning workbook for the rest - and replaces their source values. '
+      + SYNC_EFFECT,
+    ok: 'Re-sync all feeds',
+  });
+  if (!ok) return;
   const r = await api('/api/feeds/sync-all', { method: 'POST' });
   toast(`Re-synced ${r.batches.length} feeds — overrides preserved`);
   loadFeeds();

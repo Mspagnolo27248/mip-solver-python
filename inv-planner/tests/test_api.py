@@ -870,17 +870,18 @@ def test_backfilling_gaps_leaves_the_schedule_it_fills_around(db):
 
 def test_overwriting_still_clears_the_siblings_on_every_day_written(db):
     """The guard above must not have turned the sibling clear off. A plain fill
-    still owns the whole range: a unit runs one feed at a time."""
+    still owns the whole range on a unit that runs one feed at a time."""
     from invplanner.db import service as svc
     from invplanner.db.models import ScheduleEntry
 
     scenario, live, dates = _fill_scenario(db, "fill-overwrite-siblings")
-    hydro = sorted(k for k in live if k.startswith("HYDRO#"))
-    target, other = hydro[0], hydro[1]
-    down = svc.downtime_days(db, scenario.id).get("HYDRO", set())
+    mek = sorted(k for k in live if k.startswith("MEK#"))
+    assert len(mek) > 1, "this test needs a one-feed unit with more than one line"
+    target, other = mek[0], mek[1]
+    down = svc.downtime_days(db, scenario.id).get("MEK", set())
     window = [d for d in dates[:16] if d not in down]
 
-    svc.fill_schedule(db, scenario.id, "HYDRO", 0.0, live_keys=live, actor="test")
+    svc.fill_schedule(db, scenario.id, "MEK", 0.0, live_keys=live, actor="test")
     for d in window[:3]:
         _set_cell(db, scenario.id, other, d, 4500.0)
 
@@ -893,6 +894,39 @@ def test_overwriting_still_clears_the_siblings_on_every_day_written(db):
         ScheduleEntry.line_key == other)}
     for d in window[:3]:
         assert not kept.get(d)
+
+
+def test_a_fill_leaves_the_other_lines_where_several_run_on_one_day(db):
+    """Clearing the siblings is right on MEK, EXTRACT and ROSE and wrong
+    elsewhere. In the plans on 2026-09-13 the Platformer had two or more lines on
+    3,573 of 5,968 charged days, HYDRO on 230 of 2,810 and TRANSFER_DIESEL on
+    288 of 2,246. Filling one Platformer line cleared the others, so laying the
+    Platformer down a line at a time wiped each line as the next was filled."""
+    from invplanner import model_config as cfg
+    from invplanner.db import service as svc
+    from invplanner.db.models import ScheduleEntry
+
+    assert cfg.ONE_FEED_UNITS == ["MEK", "EXTRACT", "ROSE"]
+    scenario, live, dates = _fill_scenario(db, "fill-parallel-lines")
+    for unit in ("PLATFORMER", "HYDRO", "TRANSFER_DIESEL"):
+        assert not cfg.runs_one_feed(unit)
+        lines = sorted(k for k in live if k.startswith(unit + "#"))
+        assert len(lines) > 1, "{} needs more than one line".format(unit)
+        target, other = lines[0], lines[1]
+        down = svc.downtime_days(db, scenario.id).get(unit, set())
+        window = [d for d in dates[:12] if d not in down]
+        svc.fill_schedule(db, scenario.id, unit, 0.0, live_keys=live, actor="test")
+        for d in window[:3]:
+            _set_cell(db, scenario.id, other, d, 1500.0)
+
+        r = svc.fill_schedule(db, scenario.id, target, 2000.0, start=window[0],
+                              end=window[-1], live_keys=live, actor="test")
+        assert r["siblings_cleared"] == 0, unit
+        kept = {e.date: e.bbl for e in db.query(ScheduleEntry).filter(
+            ScheduleEntry.scenario_id == scenario.id,
+            ScheduleEntry.line_key == other)}
+        for d in window[:3]:
+            assert kept.get(d) == 1500.0, "{} lost {} on {}".format(unit, other, d)
 
 
 # ------------------------------------------------------------ optimizer runs
@@ -1098,3 +1132,42 @@ def test_the_page_and_its_files_are_revalidated():
         assert r.headers.get("cache-control") == "no-cache", path
     # the API is left alone
     assert "cache-control" not in client.get("/api/health").headers
+
+
+def test_undo_puts_a_removed_downtime_window_back_as_it_was(db):
+    """Removing downtime is one click with Undo, and Undo adds the window again.
+    A detected window - inferred from the workbook, never confirmed - has to come
+    back detected, not quietly promoted to confirmed."""
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import service as svc
+    from invplanner.db.models import Scenario as ScenarioModel
+    from invplanner.db.session import get_session
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    sid = db.query(ScenarioModel).order_by(ScenarioModel.id).first().id
+    url = "/api/scenarios/{}/downtime".format(sid)
+    try:
+        r = client.post(url, json={"unit": "ROSE", "start": "2026-10-01",
+                                   "end": "2026-10-03", "reason": "undo check",
+                                   "status": "detected"})
+        assert r.status_code == 200, r.text
+        wins = {w["id"]: w for w in svc.list_downtime(db, sid)}
+        assert wins[r.json()["id"]]["status"] == "detected"
+
+        bad = client.post(url, json={"unit": "ROSE", "start": "2026-10-01",
+                                     "end": "2026-10-03", "status": "maybe"})
+        assert bad.status_code == 400
+
+        # a window added by hand, with no status sent, is still confirmed
+        by_hand = client.post(url, json={"unit": "ROSE", "start": "2026-10-05",
+                                         "end": "2026-10-06"})
+        wins = {w["id"]: w for w in svc.list_downtime(db, sid)}
+        assert wins[by_hand.json()["id"]]["status"] == "confirmed"
+    finally:
+        for w in svc.list_downtime(db, sid):
+            if w["unit"] == "ROSE" and w["start"] in ("2026-10-01", "2026-10-05"):
+                client.delete("{}/{}".format(url, w["id"]))
+        app.dependency_overrides.clear()

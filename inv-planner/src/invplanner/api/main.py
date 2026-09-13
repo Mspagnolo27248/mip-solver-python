@@ -80,7 +80,8 @@ class ScheduleFill(BaseModel):
     #: line. This is how the tail of a copied schedule is filled without
     #: disturbing the part it covers.
     overwrite: bool = True
-    #: Clear the other lines on the same unit over the same days.
+    #: Clear the other lines on the same unit over the same days - only on units
+    #: that run one feed at a time (`cfg.ONE_FEED_UNITS`).
     exclusive: bool = True
     actor: str = "planner"
 
@@ -104,6 +105,9 @@ class DowntimeIn(BaseModel):
     end: dt.date
     reason: str = ""
     actor: str = "planner"
+    #: Sent only when Undo puts a removed window back, so a detected window -
+    #: inferred from the workbook, never confirmed - returns as detected.
+    status: Optional[str] = None
 
 
 class DowntimeDayIn(BaseModel):
@@ -775,7 +779,9 @@ def get_schedule(scenario_id: int, days: int = Query(42, le=400), offset: int = 
            "crude": crude,
            "units": [{"unit": u, "lines": lines,
                       "downtime": sorted(x.isoformat() for x in down.get(u, set())
-                                         if x in dset)}
+                                         if x in dset),
+                      # whether Set a rate clears the unit's other lines
+                      "one_feed": cfg.runs_one_feed(u)}
                      for u, lines in units.items()],
            "downtime_windows": svc.list_downtime(db, s.id),
            "total_days": len(s.inputs["dates"])}
@@ -914,8 +920,11 @@ def post_downtime(scenario_id: int, body: DowntimeIn,
                   db: Session = Depends(get_session)) -> Dict[str, Any]:
     _get_scenario(db, scenario_id)
     try:
+        if body.status not in (None, "detected", "confirmed"):
+            raise ValueError("status must be detected or confirmed")
         row = svc.add_downtime(db, scenario_id, body.unit, body.start, body.end,
-                               body.reason, body.actor)
+                               body.reason, body.actor,
+                               status=body.status or "confirmed")
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"id": row.id, "unit": row.unit, "days": row.days}

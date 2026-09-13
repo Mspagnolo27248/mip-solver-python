@@ -381,3 +381,13 @@ td.changed { color: var(--warn); font-weight: 600; }
 .dialog .note.warn { color: var(--warn); font-weight: 500; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 .btn:disabled { cursor: not-allowed; }
+
+/* ---- saving: what became of the box you just left (convention 14) ---- */
+.saved { outline: 2px solid var(--ok); outline-offset: -1px; }
+.save-failed, .save-failed:focus { outline: 2px solid var(--danger); outline-offset: -1px; }
+.cell-input.save-failed, .ovr-input.save-failed { background: var(--danger-soft); color: var(--danger); }
+.toast:not([hidden]) { display: flex; align-items: center; gap: 14px; }
+.toast-action {
+  font: inherit; font-weight: 600; cursor: pointer; padding: 0;
+  background: none; border: none; color: inherit; text-decoration: underline;
+}

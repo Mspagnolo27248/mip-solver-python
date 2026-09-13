@@ -344,8 +344,10 @@ something the screen doesn't show.
   Current Plan deletes its Optimized Results; an Optimized Result can be deleted on
   its own.
 - **F17, F20, F21, saving and confirming:**
-  - Single values save when you finish with the box, show a saved mark, restore
-    the stored value if the save fails, and follow the one-feed rule.
+  - Single values save when you finish with the box, show a saved mark, and
+    restore the stored value if the save fails. The one-feed part of F21 was
+    dropped on 2026-09-13: several lines on one day is normal on the Platformer,
+    HYDRO and the transfers. Set a rate now clears only on MEK, EXTRACT and ROSE.
   - Single removals happen immediately, with Undo.
   - Bulk writes and deletes ask first inside the page.
   - Unsaved panels warn before you leave them.

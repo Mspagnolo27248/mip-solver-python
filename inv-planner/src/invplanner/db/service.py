@@ -347,10 +347,13 @@ def fill_schedule(db: Session, scenario_id: int, target: str,
     unit is the operation that does make sense, and is the one a cold start
     needs.
 
-    `exclusive` is the other half of that guard. A unit runs one feed at a time,
-    so filling a line at a rate clears its siblings on the same days; without it
-    a planner setting ROSE#97 over a window where ROSE#98 was already scheduled
-    silently doubles the unit's charge.
+    `exclusive` is the other half of that guard, on the units that run one feed
+    at a time (`cfg.ONE_FEED_UNITS`): filling a line at a rate clears its
+    siblings on the same days; without it a planner setting ROSE#97 over a
+    window where ROSE#98 was already scheduled silently doubles the unit's
+    charge. The Platformer's stages, the hydrotreater's mix and the transfers
+    carry several lines on one day as a matter of course, and clearing them
+    there wiped schedules that were right, so there the others are left alone.
 
     Days a unit is down are skipped, not written. The optimizer creates no
     variable on an outage day, so a charge typed there survives into results
@@ -434,7 +437,8 @@ def fill_schedule(db: Session, scenario_id: int, target: str,
     family = sorted(k for k in (live_keys or ())
                     if k.split("#")[0] == unit) or list(keys)
     siblings: List[str] = []
-    if exclusive and bbl:
+    from .. import model_config as cfg   # as _seed_downtime_from_config does
+    if exclusive and bbl and cfg.runs_one_feed(unit):
         siblings = [k for k in family if k not in keys]
 
     entries = {}

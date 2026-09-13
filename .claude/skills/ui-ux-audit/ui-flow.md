@@ -143,7 +143,8 @@ change that" confusion comes from.
 | Open schedule / Compare with Current Plan | Reloads the scenario list, selects the result, switches to Planning, opens Charge schedule. Compare is on only for "Compare with Current Plan" | A toast |
 | Switch to *Current Plan* / *Optimized Result* (compare bar) | Selects the other half of the pair, and ⚠ **turns compare off** | A toast |
 | New Current Plan created | Reloads the list, selects the new plan, stays on the current tab | "Current Plan X created, as of *date* - schedule and downtime copied from Y" |
-| Model input edited | Every scenario's projection is recalculated on the server | "Saved *value* — projections recalculated" (⚠ doesn't say it's all scenarios) |
+| Model input edited | Every scenario's projection is recalculated on the server | "Saved *value* - every plan recalculated" |
+| Leaving Planned downtime or Set a rate with fields changed but not added or applied (closing the panel, changing tab or plan) | Nothing is written | A toast saying so, with "Open it" |
 
 ---
 
@@ -191,9 +192,9 @@ The three kinds of correction look almost the same and reach three different sco
 
 | Kind | Path | Control | Reaches | Feedback |
 |---|---|---|---|---|
-| Feed value | Source data → feed card → search → Override box, tab out | `.ovr-input` | ⚠ **Source data only.** Existing scenarios keep the old value until a new scenario is created | "Override saved (value)" |
-| Yield, rate, capacity | Model inputs → group card → search → Override box, tab out | `.ovr-input`, looks identical | ⚠ **Every scenario, straight away** | "Saved value — projections recalculated" |
-| Charge rate | Charge schedule → cell, tab out | `.cell-input` | This scenario | "Saved N bbl · projection re-simulated". ⚠ Line cells don't redraw the grid, but crude cells do (`editSchedule` vs `editCrude`) |
+| Feed value | Source data → feed card → search → Override box, tab out | `.ovr-input` | ⚠ **Source data only.** Existing scenarios keep the old value until a new scenario is created | "Override saved (value)" and a green mark on the box |
+| Yield, rate, capacity | Model inputs → group card → search → Override box, tab out | `.ovr-input`, looks identical | ⚠ **Every scenario, straight away** | "Saved value - every plan recalculated" and a green mark |
+| Charge rate | Charge schedule → cell, tab out | `.cell-input` | This scenario | A green mark on the cell and a toast; a refused edit puts the stored value back with a red outline and the reason. The unit's other lines that day are left as they are |
 
 ⚠ The feed table loads at most 800 rows (`loadFeedRows`), while its heading shows
 the full total. Nothing says "showing 800 of N".
@@ -205,7 +206,7 @@ the full total. Nothing says "showing 800 of N".
 | 1 | Charge schedule → Planned downtime (collapsed) | Unit, From, To, Reason → Add | This scenario | ⚠ From and To default to the first visible day of the first load |
 | 1b | Charge schedule grid | Clicks a Down cell to toggle one day | This scenario | No confirm. Cells on down days become read-only |
 | 2 | Capacity & alerts | Checks the effect | Display | |
-| - | Planned downtime list | remove | This scenario | No confirm |
+| - | Planned downtime list | remove | This scenario | Removed at once, with Undo in the toast |
 
 ---
 
@@ -213,25 +214,26 @@ the full total. Nothing says "showing 800 of N".
 
 | Action | Where | Scope | Confirm first | Undo | Feedback |
 |---|---|---|---|---|---|
-| Type in a charge cell, tab out | Schedule grid | This scenario | No | Retype | Toast |
-| Crude charge / R-L mode click | Schedule grid | This scenario | No | Retype / click | Toast, grid redraws |
+| Type in a charge cell, tab out | Schedule grid | This scenario | No | Retype | Green mark and a toast; red outline and the reason if refused |
+| Crude charge / R-L mode click | Schedule grid | This scenario | No | Retype / click | Green mark (charge) or redraw (mode), and a toast |
 | Down cell click | Schedule grid | This scenario | No | Click again | Toast |
 | Add downtime | Planned downtime | This scenario | No | remove | Toast |
-| remove downtime | Planned downtime list | This scenario | No | Add again | Toast |
-| Apply (fill) | Set a rate across the window | This scenario, up to the whole horizon on a line or unit | `confirm()` | None | Note under the panel, and toast |
-| Override / clear a feed value | Source data detail | Source data | No | clear | Toast |
-| Sync this feed / Re-sync all feeds | Source data | Source data | No | None (overrides are kept) | Toast |
+| remove downtime | Planned downtime list | This scenario | No | **Undo** in the toast | Toast |
+| Apply (fill) | Set a rate across the window | This scenario, up to the whole horizon on a line or unit; clears the unit's other lines only on MEK, EXTRACT and ROSE | In the page, naming the days and what else it touches | None | Note under the panel, and toast |
+| Override / clear a feed value | Source data detail | Source data | No | clear; **Undo** after a clear | Green mark, toast |
+| Sync this feed / Re-sync all feeds | Source data | Source data | In the page | None (overrides are kept) | Toast |
 | Choose / Replace file | Upload slot | Source data | No (file checked first) | use workbook | Toast |
-| use workbook | Upload slot | Source data | `confirm()` | Upload again | Toast |
-| Override / reset a model input | Model inputs detail | **All scenarios** | No | reset | Toast |
-| Change an optimizer input | Optimizer inputs | **All future runs** | No | Retype | "Saved" |
+| use workbook | Upload slot | Source data | In the page | Upload again | Toast |
+| Override / reset a model input | Model inputs detail | **All scenarios** | No | reset; **Undo** after a reset | Green mark, toast saying every plan is recalculated |
+| Change an optimizer input | Optimizer inputs | **All future runs** | No | Retype | Green mark, "Saved - every run from now on uses it"; red outline if refused |
 | New Current Plan… (two buttons, one form) | Header, Source data | New Current Plan | An in-page form with a Create button | **None: no delete in the UI yet** | Toast naming the date and the copy |
 | Run optimizer | Runs & results | New run + new scenario | No | None | Disabled button and a "solving" card, then a toast naming the outcome |
 | Export for Excel | Compare bar, run card | None (download) | No | - | Toast on the compare bar only |
 
-Nothing has undo. Only two actions confirm first, and they use native dialogs. The
-two with the widest reach (model inputs, optimizer inputs) confirm nothing and save
-when you leave the box.
+Single removals have Undo; bulk writes and deletes confirm first, in the page
+(convention 14). No native dialogs are left. The two with the widest reach (model
+inputs, optimizer inputs) still save when you leave the box, with a mark and a
+message saying how far the change reaches.
 
 ---
 

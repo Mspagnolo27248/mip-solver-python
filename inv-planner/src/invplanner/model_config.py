@@ -373,6 +373,21 @@ CASCADE_UNITS = ["PLATFORMER"]
 #: the sink's offtake and its netback, not by a unit's capacity.
 TRANSFER_UNIT_PREFIXES = ("TRANSFER", "SONNEBORN", "RAILCAR")
 
+#: Units that run one feed at a time, so a rate set on one of their lines clears
+#: the unit's other lines on the same days (Set a rate across the window). Not
+#: the Platformer's parallel stages, the hydrotreater's mix or the transfers: in
+#: the plans on 2026-09-13 the Platformer had two or more lines on 3,573 of 5,968
+#: charged days, HYDRO on 230 of 2,810 and TRANSFER_DIESEL on 288 of 2,246, and
+#: clearing the others there wiped schedules that were right. MEK (4 of 1,528),
+#: EXTRACT (21 of 1,516) and ROSE (0 of 4,995) are where a second line on a day
+#: is a mistake to clean up - though a changeover day the optimizer split
+#: between two feeds looks the same, which is why a typed cell clears nothing.
+ONE_FEED_UNITS = ["MEK", "EXTRACT", "ROSE"]
+
+
+def runs_one_feed(unit: str) -> bool:
+    return unit in ONE_FEED_UNITS
+
 
 def is_decision_unit(unit: str) -> bool:
     return unit in DECISION_UNITS
