@@ -39,6 +39,8 @@ v*N*". The picker has two groups, Current Plans then Optimized Results, each new
 first. A result is labelled from its run, "Run 72 · greedy · from Plan 2026-09-13"
 (`scenario_labels`), with the stored name in the option's tooltip, and the picker's
 width is capped. On 2026-09-12 it held 73 scenarios, 56 of them Optimized Results.
+Beside the line under the title, *Delete this plan…* or *Delete this result…* acts
+on the selected scenario.
 
 ### Scope: what an edit reaches
 
@@ -51,7 +53,7 @@ This is the question a planner most often can't answer from the screen.
 | Optimizer inputs | Optimizer inputs | One global set | Every run started afterwards, on any scenario |
 | Charge schedule, crude rate and mode, planned downtime | Charge schedule | This scenario | Straight away; each cell saves when you leave it |
 | Opening inventory, orders and forecast inside a scenario | Nowhere | This scenario, frozen when it was created | Can't be edited. Make a new scenario |
-| Plan date (`as_of`) and horizon (366 days) | The New Current Plan form only | This scenario | Can't be changed after creation. There is no delete in the UI either |
+| Plan date (`as_of`) and horizon (366 days) | The New Current Plan form only | This scenario | Can't be changed after creation. The plan can be deleted (section 6) |
 | Optimizer runs | Runs & results | One global list, last 25, not filtered by scenario; one run at a time | Each lands as an Optimized Result (a scenario with status `proposed`) |
 
 ⚠ The header scenario picker stays visible on the three global tabs: Source data,
@@ -226,9 +228,11 @@ the full total. Nothing says "showing 800 of N".
 | use workbook | Upload slot | Source data | In the page | Upload again | Toast |
 | Override / reset a model input | Model inputs detail | **All scenarios** | No | reset; **Undo** after a reset | Green mark, toast saying every plan is recalculated |
 | Change an optimizer input | Optimizer inputs | **All future runs** | No | Retype | Green mark, "Saved - every run from now on uses it"; red outline if refused |
-| New Current Plan… (two buttons, one form) | Header, Source data | New Current Plan | An in-page form with a Create button | **None: no delete in the UI yet** | Toast naming the date and the copy |
+| New Current Plan… (two buttons, one form) | Header, Source data | New Current Plan | An in-page form with a Create button | Delete the plan (below) | Toast naming the date and the copy |
 | Run optimizer | Runs & results | New run + new scenario | No | None | Disabled button and a "solving" card, then a toast naming the outcome |
 | Export for Excel | Compare bar, run card | None (download) | No | - | Toast on the compare bar only |
+| Delete this plan… | Beside the line under the title | The Current Plan, every Optimized Result made from it, and all their run cards | In the page, naming them all | **None** | Toast; if the selected plan went, the newest Current Plan is selected |
+| Delete this result… / Delete result | Beside the line under the title; run card | That Optimized Result and its run card. Results made from it stay, their runs pointed at the scenario it came from | In the page, naming what goes and what stays | **None** | Toast |
 
 Single removals have Undo; bulk writes and deletes confirm first, in the page
 (convention 14). No native dialogs are left. The two with the widest reach (model
@@ -316,7 +320,7 @@ only what is shown.
     optimal.
   - "Settings used" (collapsed) lists the optimizer inputs the run was given, next to
     the inputs now, and counts the ones that differ.
-  - Actions: Open schedule, Compare with Current Plan, Export for Excel.
+  - Actions: Open schedule, Compare with Current Plan, Export for Excel, Delete result.
   - An unverified run offers "Inspect the rejected schedule" and no export. The export
     endpoint refuses it too, the picker adds "· unverified" to its name, and its
     compare bar shows "unverified · not exportable" instead of Export for Excel.

@@ -354,10 +354,10 @@ something the screen doesn't show.
   - Run cards show the settings they used.
   - This is rule 14 in `conventions.md`.
 
-**Still open:**
+**Decided on 2026-09-13:**
 
-- **F8, delete details:** whether a deleted result's run card goes with it, and
-  whether results refined from it go too.
+- **F8, delete details:** a deleted result's run card goes with it; results made
+  from it stay and still name their Current Plan.
 
 **The options that were put to the user:**
 

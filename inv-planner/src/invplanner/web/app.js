@@ -168,9 +168,27 @@ function askConfirm({ title, body, ok }) {
   $('#confirm-title').textContent = title;
   $('#confirm-body').textContent = body;
   $('#confirm-ok').textContent = ok;
-  dlg.returnValue = '';
   return new Promise((resolve) => {
-    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    let settled = false;
+    const done = (answer) => {
+      if (settled) return;
+      settled = true;
+      $('#confirm-ok').onclick = null;
+      $('#confirm-cancel').onclick = null;
+      dlg.removeEventListener('close', declined);
+      dlg.removeEventListener('cancel', declined);
+      if (dlg.open) dlg.close();
+      resolve(answer);
+    };
+    const declined = () => done(false);   // Escape, or anything else that shuts it
+    // The buttons answer directly. Answering from the dialog's `close` event after
+    // a form submission was not dependable: in Chrome the dialog shut with its
+    // returnValue set to "ok" and no close event followed, so OK did nothing -
+    // Set a rate, both syncs and every delete could only ever be cancelled.
+    $('#confirm-ok').onclick = () => done(true);
+    $('#confirm-cancel').onclick = declined;
+    dlg.addEventListener('close', declined);
+    dlg.addEventListener('cancel', declined);
     dlg.showModal();
     $('#confirm-ok').focus();
   });
@@ -204,6 +222,7 @@ async function boot() {
   await loadScenarioList();
   if (!state.scenarios.length) {
     $('#scenario-meta').textContent = 'No scenario yet — create one to begin.';
+    $('#delete-scenario').hidden = true;
     return;
   }
   // Open on the newest Current Plan. The newest scenario of any kind is
@@ -224,6 +243,11 @@ async function selectScenario(id) {
     : 'Current Plan';
   $('#scenario-meta').textContent =
     `${what} · as of ${s.as_of} · ${s.horizon_days} day horizon · reference v${s.reference_version_id}`;
+  // Beside the line that says which kind is selected, so the link can say it too.
+  const del = $('#delete-scenario');
+  del.hidden = false;
+  del.textContent = s.kind === 'optimized_result' ? 'Delete this result…' : 'Delete this plan…';
+  del.title = `Delete “${s.label}”`;
   state.products = await api(`/api/scenarios/${id}/products`);
   const psel = $('#product-select');
   psel.innerHTML = '';
@@ -1593,8 +1617,12 @@ async function loadOptRuns() {
             }, r.status);
 
     // What the run started from - a Current Plan, or for a refined run an
-    // Optimized Result.
-    const baseWord = r.base_kind === 'optimized_result' ? 'Optimized Result' : 'Current Plan';
+    // Optimized Result. That result may since have been deleted: the run then
+    // points at the scenario it came from (convention 13), and the card still
+    // names the result it really started from, which its numbers were scored on.
+    const gone = k.started_from_deleted || null;
+    const baseNow = r.base_kind === 'optimized_result' ? 'Optimized Result' : 'Current Plan';
+    const baseWord = gone ? 'Optimized Result' : baseNow;
     const head = el('div', { class: 'run-head' },
       el('h3', {}, `Run #${r.id}`),
       badge,
@@ -1604,12 +1632,13 @@ async function loadOptRuns() {
         + `${r.solve_seconds ? r.solve_seconds.toFixed(1) + 's' : '—'}`
         + (r.objective != null ? ` · $${fmt(r.objective)}` : '')),
       el('span', { class: 'muted' },
-        `from ${baseWord} “${r.base_scenario_label || ('#' + r.base_scenario_id)}”`),
+        `from ${baseWord} “${gone ? gone.label : (r.base_scenario_label || ('#' + r.base_scenario_id))}”`
+        + (gone ? ', since deleted' : '')),
     );
 
     // Both sides scored the same way - the comparison is meaningless otherwise.
     const cmp = table(
-      ['', r.base_kind === 'optimized_result' ? 'Started from' : 'Current Plan',
+      ['', gone || r.base_kind === 'optimized_result' ? 'Started from' : 'Current Plan',
         'Optimized Result', 'Change'],
       [
         ['Lost sales (gal)', base.lost_sales_gal, opt.lost_sales_gal],
@@ -1681,9 +1710,11 @@ async function loadOptRuns() {
       }, rejected ? 'Inspect the rejected schedule' : 'Open schedule') : null,
       r.result_scenario_id ? el('button', {
         class: 'linkish',
-        title: `Open it beside the ${baseWord} it started from`,
+        title: gone
+          ? `Open it beside “${r.base_scenario_label}”, which the deleted result came from`
+          : `Open it beside the ${baseNow} it started from`,
         onclick: () => openResult(r.result_scenario_id, r.base_scenario_id),
-      }, `Compare with ${baseWord}`) : null,
+      }, `Compare with ${baseNow}`) : null,
       r.result_scenario_id && !rejected ? el('button', {
         class: 'linkish',
         title: 'Download it as blocks that paste into the workbook',
@@ -1693,6 +1724,11 @@ async function loadOptRuns() {
             + `/schedule.xlsx?days=${days}`;
         },
       }, 'Export for Excel') : null,
+      r.result_scenario_id ? el('button', {
+        class: 'linkish danger',
+        title: 'Delete this Optimized Result and this run card',
+        onclick: () => deleteScenario(r.result_scenario_id),
+      }, 'Delete result') : null,
       rejected && r.result_scenario_id
         ? el('span', { class: 'muted' }, 'Not exportable: the simulator rejected it.')
         : null,
@@ -1764,6 +1800,55 @@ async function openResult(scenarioId, compareWith) {
   toast(compareWith != null
     ? 'Opened beside the schedule it started from'
     : 'Opened — edit or compare it like any scenario');
+}
+
+/* Delete a Current Plan with its Optimized Results, or one Optimized Result with
+   its run card (convention 13). It can't be undone, so it asks first, in the
+   page, and names everything that goes and anything that stays. The list comes
+   from the server, which is what does the deleting, so the two can't disagree. */
+async function deleteScenario(id) {
+  const d = await api(`/api/scenarios/${id}/deletion`);
+  if (d.busy.length) {
+    toast(`Run #${d.busy[0]} is still solving on this - wait for it to finish before deleting.`);
+    return;
+  }
+  const quote = (labels) => (labels.length > 6
+    ? `${labels.slice(0, 6).map((l) => `“${l}”`).join(', ')} and ${labels.length - 6} more`
+    : labels.map((l) => `“${l}”`).join(', '));
+  const isPlan = d.kind === 'current_plan';
+  const cards = plural(d.runs.length, 'run card');
+  const body = isPlan
+    ? `Deletes the Current Plan “${d.label}”`
+      + (d.results.length
+        ? `, its ${plural(d.results.length, 'Optimized Result')} (${quote(d.results)})`
+        : ', which has no Optimized Results')
+      + (d.runs.length ? ` and ${cards}` : '') + '.'
+    : `Deletes the Optimized Result “${d.label}”`
+      + (d.runs.length ? ` and its ${cards}` : '')
+      + `. Its Current Plan, “${d.plan_label}”, stays.`
+      + (d.kept.length
+        ? ` ${plural(d.kept.length, 'result')} made from it `
+          + `${d.kept.length === 1 ? 'stays' : 'stay'}, still naming its Current Plan: `
+          + `${quote(d.kept)}.`
+        : '');
+  const ok = await askConfirm({
+    title: isPlan ? 'Delete Current Plan' : 'Delete Optimized Result',
+    body: `${body} This can't be undone.`,
+    ok: isPlan && d.results.length
+      ? `Delete the plan and ${plural(d.results.length, 'result')}`
+      : 'Delete',
+  });
+  if (!ok) return;
+  const r = await api(`/api/scenarios/${id}`, { method: 'DELETE' });
+  toast(`Deleted “${r.label}”`
+    + (isPlan && r.results.length ? ` and ${plural(r.results.length, 'Optimized Result')}` : ''));
+  if (state.scenario && r.scenario_ids.includes(state.scenario.id)) {
+    state.scenario = null;          // it is gone: open the newest Current Plan
+    await boot();
+  } else {
+    await loadScenarioList();
+    if (state.scenario) await selectScenario(state.scenario.id);   // pair and runs moved
+  }
 }
 
 /* ------------------------------------------------------------------- nav */
@@ -2054,6 +2139,9 @@ async function createNewPlan(e) {
 }
 
 $('#new-scenario').addEventListener('click', newScenario);
+$('#delete-scenario').addEventListener('click', () => {
+  if (state.scenario) deleteScenario(state.scenario.id);
+});
 $('#upload-scenario').addEventListener('click', newScenario);
 $('#new-plan-form').addEventListener('submit', createNewPlan);
 $('#np-cancel').addEventListener('click', () => $('#new-plan').close());

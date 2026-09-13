@@ -103,6 +103,12 @@ product codes — edit them there if a product belongs somewhere else. Anything 
 assigned shows up under "Other" rather than disappearing, and a test enforces that
 every product appears in exactly one group.
 
+**Deleting.** *Delete this plan…*, beside the line under the title, deletes the
+selected Current Plan with every Optimized Result made from it and their run
+cards. *Delete this result…*, or *Delete result* on a run card, deletes one
+Optimized Result and its run card; results refined from it stay and still name
+their Current Plan. Both ask first and name what goes. Neither can be undone.
+
 ### Running the greedy scheduler
 
 `greedy` builds a schedule by rule instead of by solver. It decides the same

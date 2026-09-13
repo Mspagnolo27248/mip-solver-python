@@ -549,3 +549,92 @@ def pair_for(db: Session, scenario_id: int) -> Dict[str, Any]:
                 "other_role": "optimized_result",
                 "other_label": other.get("label")}
     return {}
+
+
+# ------------------------------------------------------------------ deleting
+def _deletion_set(db: Session, scenario_id: int):
+    """The scenarios and runs a delete removes, and the results it leaves.
+
+    Decided by the user on 2026-09-12 and 2026-09-13 (UI convention 13):
+
+    - A Current Plan goes with every Optimized Result made from it, however
+      many refinements deep, and with every run started from any of them.
+    - An Optimized Result goes with its own run card. Results made *from* it
+      stay; `delete_scenario` points their runs at the scenario it came from.
+    """
+    labels = scenario_labels(db)
+    me = labels.get(scenario_id)
+    if me is None:
+        raise KeyError("no scenario {}".format(scenario_id))
+    if me["kind"] == "current_plan":
+        doomed = {sid for sid, l in labels.items() if l["plan_id"] == scenario_id}
+        kept: set = set()
+    else:
+        doomed = {scenario_id}
+        kept = {r.result_scenario_id for r in db.query(OptimizerRun).filter(
+            OptimizerRun.base_scenario_id == scenario_id,
+            OptimizerRun.result_scenario_id.isnot(None))}
+    runs = [r for r in db.query(OptimizerRun).filter(
+                OptimizerRun.result_scenario_id.in_(doomed)
+                | OptimizerRun.base_scenario_id.in_(doomed))
+            # a kept result's own run survives, pointed elsewhere
+            if r.result_scenario_id not in kept]
+    return me, labels, doomed, kept, runs
+
+
+def deletion(db: Session, scenario_id: int) -> Dict[str, Any]:
+    """What deleting a scenario takes with it, for the confirmation to name."""
+    me, labels, doomed, kept, runs = _deletion_set(db, scenario_id)
+    results = sorted((s for s in doomed
+                      if labels[s]["kind"] == "optimized_result"), reverse=True)
+    return {
+        "scenario_id": scenario_id, "kind": me["kind"], "label": me["label"],
+        "plan_label": me["plan_label"],
+        "scenario_ids": sorted(doomed),
+        "result_ids": results,
+        "results": [labels[s]["label"] for s in results],
+        "runs": sorted(r.id for r in runs),
+        "kept": [labels[k]["label"] for k in sorted(kept) if k in labels],
+        "busy": sorted(r.id for r in runs if in_progress(r)),
+    }
+
+
+def delete_scenario(db: Session, scenario_id: int,
+                    actor: str = "planner") -> Dict[str, Any]:
+    """Delete a scenario and what goes with it; see `_deletion_set`.
+
+    A result made from the deleted one keeps a valid reference and still names
+    its Current Plan: its run is pointed at the scenario the deleted result came
+    from, and its KPIs note the result it really started from, since its
+    comparison numbers were scored against that one. Runs go before scenarios,
+    because they refer to them.
+    """
+    summary = deletion(db, scenario_id)
+    if summary["busy"]:
+        raise RuntimeError("run {} is still solving on this - wait for it to finish "
+                           "before deleting".format(summary["busy"][0]))
+    me, labels, doomed, kept, runs = _deletion_set(db, scenario_id)
+    if kept:
+        made = (db.query(OptimizerRun)
+                .filter(OptimizerRun.result_scenario_id == scenario_id)
+                .order_by(OptimizerRun.id.desc()).first())
+        for child in db.query(OptimizerRun).filter(
+                OptimizerRun.base_scenario_id == scenario_id,
+                OptimizerRun.result_scenario_id.in_(kept)):
+            child.base_scenario_id = made.base_scenario_id
+            child.kpis = dict(child.kpis or {}, started_from_deleted={
+                "scenario_id": scenario_id, "label": me["label"]})
+    for run in runs:
+        db.delete(run)
+    db.flush()
+    for sid in doomed:
+        scenario = db.query(Scenario).get(sid)
+        if scenario is not None:
+            db.delete(scenario)      # its grid, crude days and downtime cascade
+    db.add(AuditEvent(actor=actor, action="scenario.delete", target=str(scenario_id),
+                      detail={"label": me["label"], "scenarios": sorted(doomed),
+                              "runs": summary["runs"], "kept": sorted(kept)}))
+    db.commit()
+    for sid in doomed:
+        svc.invalidate(sid)
+    return summary

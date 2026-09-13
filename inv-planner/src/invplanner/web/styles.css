@@ -391,3 +391,6 @@ td.changed { color: var(--warn); font-weight: 600; }
   font: inherit; font-weight: 600; cursor: pointer; padding: 0;
   background: none; border: none; color: inherit; text-decoration: underline;
 }
+
+/* ---- deleting: the one action on screen that cannot be taken back ---- */
+.linkish.danger { color: var(--danger); }

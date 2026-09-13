@@ -89,9 +89,10 @@ Decided by the user after the plan and optimizer audit
     - **Deleting a Current Plan also deletes all of its Optimized Results.** An
       Optimized Result can be deleted on its own, and its Current Plan stays.
       Confirmed by the user on 2026-09-12, along with the two separate lists.
-    - *To confirm when it's built:* whether a deleted result's run card goes with
-      it, and whether results refined from it (Refine with v2) go too. The
-      confirmation should list both.
+    - **Decided 2026-09-13:** a deleted result's run card goes with it. Results
+      made from it stay: their runs are pointed at the scenario it came from, so
+      they still name their Current Plan, and each card notes the result it
+      really started from. The confirmation names what goes and what stays.
 14. **Saving and confirming follow one rule.** Agreed by the user on 2026-09-12
     (report F17, F20, F21).
     - **Single values save when you finish with the box**, as in Excel: Tab, click

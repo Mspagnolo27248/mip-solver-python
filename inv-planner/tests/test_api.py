@@ -1171,3 +1171,148 @@ def test_undo_puts_a_removed_downtime_window_back_as_it_was(db):
             if w["unit"] == "ROSE" and w["start"] in ("2026-10-01", "2026-10-05"):
                 client.delete("{}/{}".format(url, w["id"]))
         app.dependency_overrides.clear()
+
+
+# ------------------------------------------------------------------ deleting
+def _plan_with_a_refined_result(db, name):
+    """A Current Plan, a greedy result from it, and a v2 result refined from that."""
+    import datetime as dt
+
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db import service as svc
+    from invplanner.db.models import OptimizerRun, Scenario
+
+    class _Result:                       # what a solver hands back
+        charge = {}
+        transfer_bbl = {}
+
+    plan = svc.create_scenario(db, name, dt.date(2026, 7, 23), 60, "test")
+    first_id = optsvc._write_result_scenario(db, plan, _Result(), "test", 0,
+                                             model_version="greedy")
+    run1 = OptimizerRun(base_scenario_id=plan.id, result_scenario_id=first_id,
+                        created_by="test", params={"model_version": "greedy"},
+                        status="not_proved_optimal", kpis={})
+    db.add(run1)
+    db.commit()
+    refined_id = optsvc._write_result_scenario(
+        db, db.query(Scenario).get(first_id), _Result(), "test", 0,
+        model_version="v2")
+    run2 = OptimizerRun(base_scenario_id=first_id, result_scenario_id=refined_id,
+                        created_by="test", params={"model_version": "v2"},
+                        status="not_proved_optimal", kpis={})
+    db.add(run2)
+    db.commit()
+    return plan.id, first_id, refined_id, run1.id, run2.id
+
+
+def test_deleting_a_current_plan_takes_its_results_and_run_cards(db):
+    """A Current Plan goes with every Optimized Result made from it, however
+    many refinements deep, every run card started from any of them, and their
+    grids and downtime. Another plan is untouched. (Convention 13.)"""
+    import datetime as dt
+
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import service as svc
+    from invplanner.db.models import (CrudeDay, OptimizerRun, PlannedDowntime,
+                                      Scenario, ScheduleEntry)
+    from invplanner.db.session import get_session
+
+    plan, first, refined, run1, run2 = _plan_with_a_refined_result(db, "Plan to delete")
+    failed = OptimizerRun(base_scenario_id=plan, created_by="test", params={},
+                          status="infeasible")
+    db.add(failed)
+    db.commit()
+    failed_id = failed.id
+    other = svc.create_scenario(db, "Plan that stays", dt.date(2026, 7, 23), 60,
+                                "test").id
+    gone = [plan, first, refined]
+    assert db.query(ScheduleEntry).filter(ScheduleEntry.scenario_id.in_(gone)).count()
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    try:
+        preview = client.get("/api/scenarios/{}/deletion".format(plan)).json()
+        assert preview["kind"] == "current_plan"
+        assert set(preview["result_ids"]) == {first, refined}
+        assert set(preview["runs"]) == {run1, run2, failed_id}
+        assert preview["kept"] == [] and preview["busy"] == []
+
+        r = client.delete("/api/scenarios/{}".format(plan))
+        assert r.status_code == 200, r.text
+        for sid in gone:
+            assert db.query(Scenario).get(sid) is None
+        assert db.query(OptimizerRun).filter(
+            OptimizerRun.id.in_([run1, run2, failed_id])).count() == 0
+        for model in (ScheduleEntry, CrudeDay, PlannedDowntime):
+            assert db.query(model).filter(model.scenario_id.in_(gone)).count() == 0
+        assert db.query(Scenario).get(other) is not None
+        assert client.get("/api/scenarios/{}".format(plan)).status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_deleting_a_result_keeps_the_results_made_from_it(db):
+    """An Optimized Result goes with its own run card. A result refined from it
+    stays, still names its Current Plan, keeps a valid reference, and its card
+    still says which result it really started from. (Convention 13.)"""
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db.models import OptimizerRun, Scenario
+    from invplanner.db.session import get_session
+
+    plan, first, refined, run1, run2 = _plan_with_a_refined_result(db, "Plan keeps")
+    labels = optsvc.scenario_labels(db)
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    try:
+        preview = client.get("/api/scenarios/{}/deletion".format(first)).json()
+        assert preview["kind"] == "optimized_result"
+        assert preview["result_ids"] == [first] and preview["runs"] == [run1]
+        assert preview["kept"] == [labels[refined]["label"]]
+        assert preview["plan_label"] == "Plan keeps"
+
+        assert client.delete("/api/scenarios/{}".format(first)).status_code == 200
+        assert db.query(Scenario).get(first) is None
+        assert db.query(OptimizerRun).get(run1) is None
+        assert db.query(Scenario).get(plan) is not None
+        assert db.query(Scenario).get(refined) is not None
+
+        kept = db.query(OptimizerRun).get(run2)
+        assert kept.base_scenario_id == plan
+        assert kept.kpis["started_from_deleted"]["label"] == labels[first]["label"]
+        assert optsvc.scenario_labels(db)[refined]["label"].endswith("from Plan keeps")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_a_plan_is_not_deleted_while_a_run_solves_on_it(db):
+    import datetime as dt
+
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import service as svc
+    from invplanner.db.models import OptimizerRun, Scenario
+    from invplanner.db.session import get_session
+
+    plan = svc.create_scenario(db, "Plan still solving", dt.date(2026, 7, 23), 60,
+                               "test")
+    live = OptimizerRun(base_scenario_id=plan.id, created_by="test",
+                        params={"time_limit_seconds": 900}, status="running")
+    db.add(live)
+    db.commit()
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    try:
+        r = client.delete("/api/scenarios/{}".format(plan.id))
+        assert r.status_code == 409, r.text
+        assert db.query(Scenario).get(plan.id) is not None
+    finally:
+        live.status = "error"   # never leave a live-looking row for other tests
+        db.commit()
+        app.dependency_overrides.clear()

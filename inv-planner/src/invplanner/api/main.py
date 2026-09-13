@@ -433,6 +433,29 @@ def get_scenario(scenario_id: int, db: Session = Depends(get_session)) -> Dict[s
     return out
 
 
+@app.get("/api/scenarios/{scenario_id}/deletion")
+def preview_deletion(scenario_id: int,
+                     db: Session = Depends(get_session)) -> Dict[str, Any]:
+    """What deleting this scenario would take with it, for the confirmation."""
+    try:
+        return optsvc.deletion(db, scenario_id)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/api/scenarios/{scenario_id}")
+def delete_scenario(scenario_id: int, actor: str = "planner",
+                    db: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Delete a Current Plan with its Optimized Results, or one Optimized Result
+    with its run card (UI convention 13). Cannot be undone."""
+    try:
+        return optsvc.delete_scenario(db, scenario_id, actor)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
 @app.get("/api/scenarios/{scenario_id}/products")
 def scenario_products(scenario_id: int,
                       db: Session = Depends(get_session)) -> List[Dict[str, Any]]:
