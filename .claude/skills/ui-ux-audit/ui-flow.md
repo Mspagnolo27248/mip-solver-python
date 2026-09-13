@@ -51,7 +51,7 @@ This is the question a planner most often can't answer from the screen.
 | Optimizer inputs | Optimizer inputs | One global set | Every run started afterwards, on any scenario |
 | Charge schedule, crude rate and mode, planned downtime | Charge schedule | This scenario | Straight away; each cell saves when you leave it |
 | Opening inventory, orders and forecast inside a scenario | Nowhere | This scenario, frozen when it was created | Can't be edited. Make a new scenario |
-| Plan date (`as_of`) and horizon (366 days) | The New scenario prompt only | This scenario | Can't be changed after creation. There is no delete in the UI either |
+| Plan date (`as_of`) and horizon (366 days) | The New Current Plan form only | This scenario | Can't be changed after creation. There is no delete in the UI either |
 | Optimizer runs | Runs & results | One global list, last 25, not filtered by scenario; one run at a time | Each lands as an Optimized Result (a scenario with status `proposed`) |
 
 ⚠ The header scenario picker stays visible on the three global tabs: Source data,
@@ -66,7 +66,7 @@ flowchart LR
   subgraph Header["Header - on every screen"]
     MODE["Mode switch<br/>Planning / Optimizer"]
     PICK["Scenario picker<br/>newest first"]
-    NEW["New scenario"]
+    NEW["New Current Plan…<br/>one form"]
   end
 
   subgraph P["Planning mode"]
@@ -90,7 +90,7 @@ flowchart LR
   DASH -- "click a chart" --> PROJ
   RUNS -- "Open schedule / Compare with Current Plan<br/>changes mode and scenario" --> SCHED
   SCHED -- "Switch to Current Plan / Optimized Result<br/>changes scenario" --> SCHED
-  FEEDS -- "Create scenario from source data<br/>same handler" --> NEW
+  FEEDS -- "New Current Plan…<br/>same form" --> NEW
   NEW -- "selects the new scenario" --> PICK
 ```
 
@@ -112,9 +112,9 @@ flowchart TD
   WB["Workbook seed"] -->|"Sync this feed, Re-sync all, use workbook"| SRC
   SRC["Source data<br/>source value + override = effective value"]
   SEL["Selected scenario<br/>(header picker)"]
-  SRC -->|"New scenario freezes the effective values"| SCN
-  SEL -->|"New scenario copies charge grid, crude and downtime<br/>matched by calendar date"| SCN
-  SCN["New scenario<br/>draft, 366 days from the date typed"]
+  SRC -->|"New Current Plan freezes the effective values"| SCN
+  SEL -->|"the plan picked in the form, default the selected Current Plan:<br/>charge grid, crude and downtime by calendar date"| SCN
+  SCN["New Current Plan<br/>draft, 366 days from the date picked"]
   REFD["Model inputs<br/>imported + override"] -->|"every edit, every scenario"| SIM
   SCN --> SIM["Simulation<br/>alerts, dashboards, stream sheet, projection"]
   EDIT["Charge schedule edits"] -->|"this scenario only"| SIM
@@ -142,7 +142,7 @@ change that" confusion comes from.
 | **A run finishing** | The runs list and the picker reload. The plan the run started from **stays selected** (`loadScenarioList`) | "Run #N finished: *outcome*. Its card is at the top." |
 | Open schedule / Compare with Current Plan | Reloads the scenario list, selects the result, switches to Planning, opens Charge schedule. Compare is on only for "Compare with Current Plan" | A toast |
 | Switch to *Current Plan* / *Optimized Result* (compare bar) | Selects the other half of the pair, and ⚠ **turns compare off** | A toast |
-| New scenario created | Reloads the list, selects the new scenario, stays on the current tab | "Scenario X created from the current source data" (⚠ doesn't mention the copied grid) |
+| New Current Plan created | Reloads the list, selects the new plan, stays on the current tab | "Current Plan X created, as of *date* - schedule and downtime copied from Y" |
 | Model input edited | Every scenario's projection is recalculated on the server | "Saved *value* — projections recalculated" (⚠ doesn't say it's all scenarios) |
 
 ---
@@ -167,10 +167,9 @@ their head because the screen doesn't show it. That column is the one to audit.
 | # | Where | Planner does | Touches | Must remember |
 |---|---|---|---|---|
 | 1 | Source data → Upload source files | Choose file, three times, one per slot | Source data (global) | Each file is checked before it replaces anything. The toast says how many values went into which feeds |
-| 2 | Header picker | Selects the scenario whose charge grid should carry forward | - | ⚠ **This must happen before step 3.** Only the README says so |
-| 3 | New scenario, or Create scenario from source data | Types a name, then a plan date in a native `prompt()` | New scenario | ⚠ Free-text date, not checked. ⚠ The default is **today in UTC** (`toISOString`), so a US evening proposes tomorrow. ⚠ The date can't be changed afterwards |
-| 4 | Charge schedule | Checks the copied grid; fills the tail with Set a rate across the window → Only days the unit is idle | This scenario | ⚠ The grid was copied **by calendar date**, so a plan dated later than its source has a blank tail. Nothing on screen says so |
-| 5 | Capacity & alerts | Checks the new plan | Display | |
+| 2 | New Current Plan… (header or Source data) | In one form: a name; a plan date from a date picker, defaulting to today in local time; the plan to copy the schedule and downtime from, defaulting to the selected Current Plan | New Current Plan | The form shows when the tank inventory was uploaded, warns when the date is more than a week back or in the future, and says how many days at either end start blank. ⚠ The date can't be changed afterwards |
+| 3 | Charge schedule | Fills any blank days with Set a rate across the window → Only days the unit is idle | This scenario | The form said how many days start blank; nothing on the grid marks them |
+| 4 | Capacity & alerts | Checks the new plan | Display | |
 
 ### W3 - Optimize and decide
 
@@ -226,7 +225,7 @@ the full total. Nothing says "showing 800 of N".
 | use workbook | Upload slot | Source data | `confirm()` | Upload again | Toast |
 | Override / reset a model input | Model inputs detail | **All scenarios** | No | reset | Toast |
 | Change an optimizer input | Optimizer inputs | **All future runs** | No | Retype | "Saved" |
-| New scenario / Create scenario from source data | Header, Source data | New scenario | Two `prompt()`s | **None: no delete in the UI** | Toast |
+| New Current Plan… (two buttons, one form) | Header, Source data | New Current Plan | An in-page form with a Create button | **None: no delete in the UI yet** | Toast naming the date and the copy |
 | Run optimizer | Runs & results | New run + new scenario | No | None | Disabled button and a "solving" card, then a toast naming the outcome |
 | Export for Excel | Compare bar, run card | None (download) | No | - | Toast on the compare bar only |
 
@@ -287,8 +286,8 @@ only what is shown.
     differences highlighted.
 
 **Source data** (`#view-feeds`)
-- Re-sync all feeds (primary button).
-- Upload source files card: Create scenario from source data (primary), and one slot
+- Re-sync all feeds (secondary button).
+- Upload source files card: New Current Plan… (primary), and one slot
   per file kind with Choose/Replace file and use workbook.
 - Feed cards open the detail panel: search, filter (All / Overridden only / Stale),
   Sync this feed, and a table with Source / Override / Effective / Status / By / clear.

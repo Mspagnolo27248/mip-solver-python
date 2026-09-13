@@ -1633,23 +1633,141 @@ $('#sync-all').addEventListener('click', async () => {
  * again.
  *
  * So there is one path now. Uploading is how data gets in, which makes "the day
- * the inventory was taken" the question worth asking every time. */
+ * the inventory was taken" the question worth asking every time.
+ *
+ * And it is a form rather than two prompt() boxes. Those took the date as free
+ * text nothing checked, defaulted it to *UTC* - "Plan 2026-09-13" was created at
+ * 8:06 PM on the 12th - and copied the charge grid from whatever happened to be
+ * selected, often an Optimized Result, without a word about it or about the
+ * days the copy leaves blank. The form asks all three, and says what each
+ * answer will do before anything is created. */
+const localISODate = (d = new Date()) =>
+  new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const daysBetween = (a, b) =>
+  Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// The horizon POST /api/scenarios gives a new scenario when none is sent.
+const NEW_PLAN_DAYS = 366;
+
 async function newScenario() {
-  const today = new Date().toISOString().slice(0, 10);
-  const name = prompt('Name for the new scenario', `Plan ${today}`);
-  if (!name) return;
-  const asOf = prompt('First day of the plan — the day the inventory you are '
-    + 'planning from was taken', today);
-  if (!asOf) return;
-  const s = await api('/api/scenarios', {
-    method: 'POST',
-    body: JSON.stringify({
-      name,
-      as_of: asOf,
-      copy_schedule_from: state.scenario ? state.scenario.id : null,
-    }),
-  });
-  toast(`Scenario "${s.name}" created from the current source data`);
+  await loadScenarioList();
+  let inventory = null;
+  try {
+    inventory = (await api('/api/feeds/uploads')).kinds.find((k) => k.kind === 'inventory');
+  } catch (e) {
+    // the form works without it; only the note about the upload is lost
+  }
+  const dlg = $('#new-plan');
+  dlg.dataset.inventory = inventory && inventory.loaded ? inventory.uploaded_at : '';
+
+  const today = localISODate();
+  $('#np-date').value = today;
+  $('#np-name').value = `Plan ${today}`;
+  $('#np-name').dataset.touched = '';
+
+  // Current Plans first; an Optimized Result can be copied, but is rarely the
+  // point. Defaults to the selected Current Plan - or, with a result selected,
+  // the plan it came from - never silently to the result itself.
+  const plans = state.scenarios.filter((s) => s.kind !== 'optimized_result');
+  const results = state.scenarios.filter((s) => s.kind === 'optimized_result');
+  const option = (s) => el('option', { value: s.id },
+    s.label + (s.run_status === 'unverified' ? ' · unverified' : ''));
+  const copy = $('#np-copy');
+  copy.replaceChildren(
+    el('optgroup', { label: 'Current Plans' }, plans.map(option)),
+    ...(results.length
+      ? [el('optgroup', { label: 'Optimized Results' }, results.map(option))]
+      : []),
+    el('option', { value: '' }, "Nothing - start from the workbook's charge schedule"));
+  const cur = state.scenario;
+  copy.value = cur ? String(cur.kind === 'optimized_result' ? cur.plan_id : cur.id) : '';
+  if (copy.selectedIndex < 0) copy.value = '';
+
+  refreshNewPlanNotes();
+  $('#np-create').disabled = false;
+  dlg.showModal();
+  $('#np-name').focus();
+  $('#np-name').select();
+}
+
+/* What each answer will do, said before anything is created. */
+function refreshNewPlanNotes() {
+  const date = $('#np-date').value;
+  const today = localISODate();
+
+  const dateBits = [];
+  let dateWarn = false;
+  const uploaded = $('#new-plan').dataset.inventory;
+  dateBits.push(uploaded
+    ? `Tank inventory in Source data was uploaded ${new Date(uploaded).toLocaleString()}.`
+    : 'Tank inventory in Source data is still read from the planning workbook.');
+  if (date) {
+    const ago = daysBetween(date, today);
+    if (ago < 0) {
+      dateBits.push(`That date is ${plural(-ago, 'day')} in the future.`);
+      dateWarn = true;
+    } else if (ago > 7) {
+      dateBits.push(`That date is ${plural(ago, 'day')} ago: the plan would run those `
+        + 'days of demand and production as if they had not happened yet.');
+      dateWarn = true;
+    }
+  }
+  $('#np-date-note').textContent = dateBits.join(' ');
+  $('#np-date-note').classList.toggle('warn', dateWarn);
+
+  const id = $('#np-copy').value;
+  const src = state.scenarios.find((s) => String(s.id) === id);
+  const copyNote = $('#np-copy-note');
+  if (!src) {
+    copyNote.textContent = "Starts from the workbook's charge schedule, with the "
+      + 'downtime detected in it marked unconfirmed.';
+    copyNote.classList.remove('warn');
+  } else if (date) {
+    // Copied by calendar date, so a plan dated later than its source runs past
+    // the end of it, and one dated earlier starts before it.
+    const offset = daysBetween(src.as_of, date);
+    const head = Math.max(0, -offset);
+    const tail = Math.max(0, offset + NEW_PLAN_DAYS - src.horizon_days);
+    const gaps = [head ? `its first ${plural(head, 'day')}` : '',
+      tail ? `its last ${plural(tail, 'day')}` : ''].filter(Boolean);
+    copyNote.textContent = `Copied by calendar date from “${src.label}”, which starts `
+      + `${src.as_of}. `
+      + (gaps.length
+        ? `This plan starts ${date}, so ${gaps.join(' and ')} start blank - fill `
+          + 'them on the Charge schedule with Set a rate across the window.'
+        : 'Every day of this plan has a day to copy.')
+      + (src.run_status === 'unverified'
+        ? ' The simulator rejected this Optimized Result.' : '');
+    copyNote.classList.toggle('warn', gaps.length > 0 || src.run_status === 'unverified');
+  }
+  $('#np-create').disabled = !$('#np-name').value.trim() || !date;
+}
+
+async function createNewPlan(e) {
+  e.preventDefault();
+  const name = $('#np-name').value.trim();
+  const asOf = $('#np-date').value;
+  const copyId = $('#np-copy').value;
+  if (!name || !asOf) return;
+  const btn = $('#np-create');
+  btn.disabled = true;           // one plan per click
+  let s;
+  try {
+    s = await api('/api/scenarios', {
+      method: 'POST',
+      body: JSON.stringify({
+        name, as_of: asOf, copy_schedule_from: copyId ? Number(copyId) : null,
+      }),
+    });
+  } catch (err) {
+    btn.disabled = false;         // api() has shown why; the form stays open
+    return;
+  }
+  $('#new-plan').close();
+  const src = state.scenarios.find((x) => String(x.id) === copyId);
+  toast(`Current Plan “${s.name}” created, as of ${s.as_of}`
+    + (src ? ` - schedule and downtime copied from “${src.label}”`
+      : " - starting from the workbook's charge schedule"));
   await loadScenarioList();
   $('#scenario-select').value = s.id;
   await selectScenario(s.id);
@@ -1657,6 +1775,19 @@ async function newScenario() {
 
 $('#new-scenario').addEventListener('click', newScenario);
 $('#upload-scenario').addEventListener('click', newScenario);
+$('#new-plan-form').addEventListener('submit', createNewPlan);
+$('#np-cancel').addEventListener('click', () => $('#new-plan').close());
+$('#np-name').addEventListener('input', (e) => {
+  e.target.dataset.touched = '1';
+  refreshNewPlanNotes();
+});
+$('#np-date').addEventListener('input', () => {
+  // The suggested name follows the date until the planner types their own.
+  const date = $('#np-date').value;
+  if (!$('#np-name').dataset.touched && date) $('#np-name').value = `Plan ${date}`;
+  refreshNewPlanNotes();
+});
+$('#np-copy').addEventListener('change', refreshNewPlanNotes);
 
 function debounce(fn, ms) {
   let t;

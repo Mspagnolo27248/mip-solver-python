@@ -120,26 +120,30 @@ walkthrough.
    (which supplies two feeds). Each file is parsed before it replaces anything,
    so a sheet whose columns have moved is rejected rather than half-imported.
 
-2. **Create the scenario.** Either the header's *New scenario* or the Source
-   data card's *Create scenario from source data* - they run the same code and
-   behave identically. Both ask for a name and for the first day of the plan, the
-   day the inventory you are planning from was taken, because that date is in
-   none of the files.
+2. **Create the Current Plan.** Either the header's *New Current Plan…* or the
+   Source data card's button of the same name - they open the same form. It asks
+   for a name, for the plan date - the day the inventory you are planning from
+   was taken, because that date is in none of the files - and for the schedule to
+   copy the charge grid and downtime from. The date defaults to today in your own
+   time zone, and the form warns when it is more than a week back or in the
+   future.
 
-   They did not always. The header button used to ask only for a name and let
-   the date fall back to the one the reference document names - the workbook's
-   own planning date. Two scenarios were made from September uploads and dated
-   2026-07-23 before anyone noticed: current tank levels, placed seven weeks in
-   the past, then seven weeks of demand and production that had already happened.
-   Nothing downstream detects it, and there is no endpoint to correct a
-   scenario's `as_of` afterwards - the only repair is to make it again.
+   The date matters because it cannot be corrected. The header button once asked
+   only for a name and let the date fall back to the workbook's own planning
+   date. Two scenarios were made from September uploads and dated 2026-07-23
+   before anyone noticed: current tank levels, placed seven weeks in the past,
+   then seven weeks of demand and production that had already happened. Nothing
+   downstream detects it, and there is no endpoint to correct a scenario's
+   `as_of` afterwards - the only repair is to make it again.
 
-   **Select the scenario you want the charge grid from before clicking.** The new
-   scenario takes opening inventory and demand from the fresh uploads, but copies
-   its grid from whatever is currently open. That matters more for greedy than
-   for the MIP: greedy derives the horizon boundary from the grid and holds the
-   platformer and the transfer lines at its levels. A blank grid is a known-bad
-   input - `v0-42-blank` is recorded infeasible in `tests/baseline.json`.
+   **Check which schedule it copies.** The new plan takes opening inventory and
+   demand from the fresh uploads, but its charge grid from the plan named in the
+   form - the selected Current Plan unless you pick another. The copy lines up by
+   calendar date, and the form says how many days at either end start blank. That
+   matters more for greedy than for the MIP: greedy derives the horizon boundary
+   from the grid and holds the platformer and the transfer lines at its levels. A
+   blank grid is a known-bad input - `v0-42-blank` is recorded infeasible in
+   `tests/baseline.json`.
 
 3. **Run greedy**, then **4. run v2 on greedy's result**, as below.
 
@@ -284,7 +288,7 @@ as negative gallons and are stored as positive demand, the forecast grids are
 daily rates in gal/day keyed by month. And uploading changes **source data
 only** — an existing scenario keeps the numbers it was frozen with, so make a new
 scenario to plan on what you just loaded. Give it the day the inventory was
-taken: the "Create scenario from source data" button asks, because a plan that
+taken: the *New Current Plan…* form asks, because a plan that
 opens with today's tanks on a date five weeks in the past is wrong in a way
 nothing downstream can detect.
 
@@ -332,6 +336,7 @@ for *structure* — status, campaign shape, switch counts — and carry no objec
 | Browser says the page can't be reached | The server terminal isn't running — start `python scripts/run_api.py` |
 | `[Errno 10048] address already in use` | A server is already running. Use it, or start on another port with `--port 8080` |
 | App loads but says "Failed to load — is the API running?" | The page is open but the server stopped; restart it and refresh |
+| After an update the page looks unchanged, or stops at "loading…" | The browser is holding an older copy of the page. Press **Ctrl+F5** once. From this version on the server tells the browser to check for a newer copy every time |
 | `Workbook not found` from `seed.py` | The `.xlsm` must sit in the parent folder, or pass its path: `python scripts/seed.py "C:\path\to\file.xlsm"` |
 
 ### Using Postgres instead of SQLite

@@ -397,6 +397,9 @@ def list_scenarios(db: Session = Depends(get_session)) -> List[Dict[str, Any]]:
 @app.post("/api/scenarios")
 def create_scenario(body: ScenarioIn,
                     db: Session = Depends(get_session)) -> Dict[str, Any]:
+    if not body.name.strip():
+        # a blank name is a picker entry nobody can find again
+        raise HTTPException(400, "a new plan needs a name")
     ref = svc.active_reference(db)
     if ref is None:
         raise HTTPException(400, "no reference loaded; run scripts/init_db.py")
@@ -960,9 +963,27 @@ def edit_crude(scenario_id: int, body: CrudeEdit,
 
 
 # ------------------------------------------------------------------- web app
+#: Sent with the page and its files, so the browser checks they are current before
+#: using them. With no cache header it decides for itself how long a copy stays
+#: fresh, and it kept an old index.html beside a new app.js: the script looked for
+#: a form the old page did not have, stopped halfway through loading, and the app
+#: never started. `no-cache` still uses the stored copy - the server answers 304
+#: when nothing changed - but only after asking. Set where the files are served
+#: rather than in middleware, which on this Python warned once per request, API
+#: calls included.
+REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+class _RevalidatedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = REVALIDATE["Cache-Control"]
+        return response
+
+
 if os.path.isdir(WEB_DIR):
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/static", _RevalidatedStaticFiles(directory=WEB_DIR), name="static")
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(os.path.join(WEB_DIR, "index.html"))
+        return FileResponse(os.path.join(WEB_DIR, "index.html"), headers=REVALIDATE)

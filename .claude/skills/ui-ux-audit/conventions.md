@@ -26,7 +26,8 @@ recommendation has to fit this.
 Each rule was learned from a real failure. The commit or comment is the reason.
 
 1. **One action, one code path.** An action reachable from two places runs one
-   handler (`de4f5fd`). *Its label and look should match too; see Open.*
+   handler (`de4f5fd`) and has one label: both New Current Plan… buttons open
+   the same form (step 4).
 2. **A button that acts on something selected elsewhere names it.** "Run optimizer
    on "X"", not "Run optimizer" (`cb491a8`, `refreshRunButton`).
 3. **Ask when a default could silently spoil a plan.** The plan's first date is

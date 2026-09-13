@@ -364,3 +364,20 @@ td.cell-diff { background: var(--warn-soft); }
 .run-message.bad { color: var(--warn); font-weight: 500; }
 .run-settings > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 td.changed { color: var(--warn); font-weight: 600; }
+
+/* ---- New Current Plan form ---- */
+.dialog {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); padding: 20px 22px;
+  width: min(580px, calc(100vw - 32px)); box-shadow: 0 12px 40px rgba(0,0,0,.28);
+}
+.dialog::backdrop { background: rgba(0,0,0,.4); }
+.dialog form { display: flex; flex-direction: column; gap: 12px; }
+.dialog .field input, .dialog .field select {
+  width: 100%; font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px;
+}
+.dialog .note { margin: -6px 0 0; font-size: 13px; color: var(--muted); }
+.dialog .note.warn { color: var(--warn); font-weight: 500; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+.btn:disabled { cursor: not-allowed; }

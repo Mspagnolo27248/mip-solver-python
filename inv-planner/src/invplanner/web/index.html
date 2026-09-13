@@ -24,7 +24,7 @@
       <span>Scenario</span>
       <select id="scenario-select"></select>
     </label>
-    <button id="new-scenario" class="btn ghost" title="Make a new Current Plan from the source data">New scenario</button>
+    <button id="new-scenario" class="btn ghost" title="Make a new Current Plan from the source data">New Current Plan…</button>
   </div>
 </header>
 
@@ -239,7 +239,7 @@
         <h2>Source data</h2>
         <p class="muted">Each value keeps what the source sent and what a planner changed it to. Re-syncing updates the source side only — your edits are never overwritten, and drift is flagged.</p>
       </div>
-      <button id="sync-all" class="btn">Re-sync all feeds</button>
+      <button id="sync-all" class="btn ghost">Re-sync all feeds</button>
     </div>
 
     <div class="card" id="feed-uploads">
@@ -248,7 +248,7 @@
           <h3>Upload source files</h3>
           <p class="muted">Load the small exports directly instead of re-importing the 6 MB planning workbook. Each file replaces its own feed; anything you have not uploaded keeps reading the workbook. A file whose columns have moved is rejected rather than half-imported, and your overrides survive as always. Uploading updates <em>source data only</em> — an open scenario keeps the numbers it was frozen with, so create a new one to plan on what you just loaded.</p>
         </div>
-        <button id="upload-scenario" class="btn">Create scenario from source data</button>
+        <button id="upload-scenario" class="btn">New Current Plan…</button>
       </div>
       <div id="upload-slots" class="feed-grid" style="padding: 14px 16px 0"></div>
     </div>
@@ -323,6 +323,25 @@
     </div>
   </section>
 </main>
+
+<!-- NEW CURRENT PLAN: one form, opened by both New Current Plan buttons -->
+<dialog id="new-plan" class="dialog" aria-labelledby="new-plan-title">
+  <form id="new-plan-form" method="dialog">
+    <div>
+      <h2 id="new-plan-title">New Current Plan</h2>
+      <p class="muted">Freezes the source data as it is now - tank inventory, open orders and forecast - and starts from the charge schedule you pick. The plan date and the frozen data can't be changed once it is created.</p>
+    </div>
+    <label class="field"><span>Name</span><input id="np-name" type="text" autocomplete="off" required></label>
+    <label class="field"><span>Plan date - the day the tank inventory was taken</span><input id="np-date" type="date" required></label>
+    <p class="note" id="np-date-note"></p>
+    <label class="field"><span>Copy the charge schedule and downtime from</span><select id="np-copy"></select></label>
+    <p class="note" id="np-copy-note"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn ghost" id="np-cancel">Cancel</button>
+      <button type="submit" class="btn" id="np-create">Create Current Plan</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="toast" class="toast" hidden></div>
 <script src="/static/app.js"></script>

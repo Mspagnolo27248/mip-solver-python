@@ -1062,3 +1062,39 @@ def test_results_are_labelled_from_their_run_and_their_current_plan(db):
         assert on_plan["pair"]["other_role"] == "optimized_result"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_a_plan_without_a_name_is_refused(db):
+    """The form will not submit a blank name, and neither will the API: a
+    blank entry in the picker is a plan nobody can find again."""
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db.session import get_session
+
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    try:
+        before = len(client.get("/api/scenarios").json())
+        r = client.post("/api/scenarios",
+                        json={"name": "   ", "as_of": "2026-09-13"})
+        assert r.status_code == 400, r.text
+        assert len(client.get("/api/scenarios").json()) == before
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_the_page_and_its_files_are_revalidated():
+    """A browser kept an old index.html beside a new app.js, and the app stopped
+    loading. The page and the static files tell the browser to check first."""
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+
+    client = TestClient(app)
+    for path in ("/", "/static/app.js", "/static/styles.css"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert r.headers.get("cache-control") == "no-cache", path
+    # the API is left alone
+    assert "cache-control" not in client.get("/api/health").headers
