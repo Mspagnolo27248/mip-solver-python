@@ -123,7 +123,7 @@ flowchart TD
   OPT["Optimizer inputs (global)"] --> RUN
   SEL -->|"Run optimizer on the selected scenario"| RUN["Optimizer run<br/>the page waits for the whole solve"]
   RUN -->|"copy of base + solved charges, status proposed"| RES["Optimized Result<br/>Run N · model · from plan"]
-  RES -. "the UI refuses to run it again" .-> RUN
+  RES -. "Run optimizer refuses it; Refine with v2 runs v2 on a verified greedy result" .-> RUN
   RES --> SIM
 ```
 
@@ -186,7 +186,7 @@ their head because the screen doesn't show it. That column is the one to audit.
 | 6 | Runs & results | Compare with Current Plan | Changes mode, scenario and tab | |
 | 7 | Charge schedule compare bar | Hide / Switch to Current Plan | Changes scenario | ⚠ Switch turns compare off |
 | 8 | Charge schedule or run card | Export for Excel | Download of the visible window, or the run's horizon | |
-| 9 | Runs & results | The README's greedy → v2 chain: run v2 on greedy's result | - | ⚠ **The UI refuses this, confirmed in code.** Every model's result, greedy included, is saved by `_write_result_scenario` with status `proposed` (`optimizer_service.py:282`), and `runOptimizer` blocks a proposed scenario. The README's chain only works through the API |
+| 9 | Runs & results | Refine with v2 on the verified greedy run's card | New run and a new Optimized Result | Runs v2 on that result whatever the Model input says; the card says which runs already refined it. Run optimizer on a greedy result points here |
 
 ### W4 - Correct a wrong number
 
@@ -230,6 +230,7 @@ the full total. Nothing says "showing 800 of N".
 | Change an optimizer input | Optimizer inputs | **All future runs** | No | Retype | Green mark, "Saved - every run from now on uses it"; red outline if refused |
 | New Current Plan… (two buttons, one form) | Header, Source data | New Current Plan | An in-page form with a Create button | Delete the plan (below) | Toast naming the date and the copy |
 | Run optimizer | Runs & results | New run + new scenario | No | None | Disabled button and a "solving" card, then a toast naming the outcome |
+| Refine with v2 | Verified greedy run card | New run + new Optimized Result: v2 on that result | No | None | The same solving state as Run optimizer; the card lists runs already refined from it |
 | Export for Excel | Compare bar, run card | None (download) | No | - | Toast on the compare bar only |
 | Delete this plan… | Beside the line under the title | The Current Plan, every Optimized Result made from it, and all their run cards | In the page, naming them all | **None** | Toast; if the selected plan went, the newest Current Plan is selected |
 | Delete this result… / Delete result | Beside the line under the title; run card | That Optimized Result and its run card. Results made from it stay, their runs pointed at the scenario it came from | In the page, naming what goes and what stays | **None** | Toast |
@@ -320,7 +321,8 @@ only what is shown.
     optimal.
   - "Settings used" (collapsed) lists the optimizer inputs the run was given, next to
     the inputs now, and counts the ones that differ.
-  - Actions: Open schedule, Compare with Current Plan, Export for Excel, Delete result.
+  - Actions: Open schedule, Compare with Current Plan, Export for Excel, Refine with v2
+    (verified greedy runs only; "again" once refined), Delete result.
   - An unverified run offers "Inspect the rejected schedule" and no export. The export
     endpoint refuses it too, the picker adds "· unverified" to its name, and its
     compare bar shows "unverified · not exportable" instead of Export for Excel.

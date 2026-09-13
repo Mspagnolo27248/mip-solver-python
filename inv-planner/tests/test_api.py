@@ -1316,3 +1316,62 @@ def test_a_plan_is_not_deleted_while_a_run_solves_on_it(db):
         live.status = "error"   # never leave a live-looking row for other tests
         db.commit()
         app.dependency_overrides.clear()
+
+
+def test_refine_with_v2_runs_v2_on_a_verified_greedy_result_only(db, monkeypatch):
+    """Refine with v2 is the one way to solve an Optimized Result again
+    (convention 12): v2, on a verified greedy run's result. An unverified greedy
+    run and a non-greedy run are refused, and a card knows what was already
+    refined from its result. The solve itself is stubbed out."""
+    import datetime as dt
+
+    from fastapi.testclient import TestClient
+
+    from invplanner.api.main import app
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db import service as svc
+    from invplanner.db.models import OptimizerParams, OptimizerRun
+    from invplanner.db.session import get_session
+
+    class _Result:                       # what a solver hands back
+        charge = {}
+        transfer_bbl = {}
+
+    plan = svc.create_scenario(db, "Plan to refine", dt.date(2026, 7, 23), 60, "test")
+    result_id = optsvc._write_result_scenario(db, plan, _Result(), "test", 0,
+                                              model_version="greedy")
+    make = lambda model, status: OptimizerRun(  # noqa: E731
+        base_scenario_id=plan.id, result_scenario_id=result_id, created_by="test",
+        params={"model_version": model}, status=status, kpis={})
+    greedy, rejected, solved = (make("greedy", "not_proved_optimal"),
+                                make("greedy", "unverified"),
+                                make("v2", "not_proved_optimal"))
+    child = OptimizerRun(base_scenario_id=result_id, created_by="test",
+                         params={"model_version": "v2"}, status="error")
+    db.add_all([greedy, rejected, solved, child])
+    db.commit()
+
+    calls = []
+    monkeypatch.setattr(optsvc, "run", lambda db_, base_id, actor="planner",
+                        model_version=None: calls.append((base_id, model_version)))
+    monkeypatch.setattr(OptimizerParams, "missing", lambda self: [])
+    app.dependency_overrides[get_session] = lambda: db
+    client = TestClient(app)
+    try:
+        listed = {x["id"]: x for x in client.get("/api/optimizer/runs").json()}
+        assert listed[greedy.id]["refinable"] is True
+        assert listed[rejected.id]["refinable"] is False
+        assert listed[solved.id]["refinable"] is False
+        assert listed[greedy.id]["refined_by"] == [child.id]
+
+        url = "/api/optimizer/runs/{}/refine"
+        assert client.post(url.format(rejected.id)).status_code == 409
+        assert client.post(url.format(solved.id)).status_code == 409
+        assert client.post(url.format(999999)).status_code == 404
+        assert calls == []
+
+        r = client.post(url.format(greedy.id))
+        assert r.status_code == 200, r.text
+        assert calls == [(result_id, "v2")]
+    finally:
+        app.dependency_overrides.clear()

@@ -356,9 +356,8 @@ def get_optimizer_runs(db: Session = Depends(get_session)) -> List[Dict[str, Any
     return optsvc.list_runs(db)
 
 
-@app.post("/api/optimizer/run")
-def post_optimizer_run(body: OptimizeRunIn,
-                       db: Session = Depends(get_session)) -> Dict[str, Any]:
+def _refuse_a_run_now(db: Session) -> None:
+    """One run at a time, and not without its inputs - for every way to start one."""
     busy = optsvc.running_run(db)
     if busy is not None:
         on = optsvc.scenario_labels(db).get(busy.base_scenario_id, {})
@@ -369,10 +368,31 @@ def post_optimizer_run(body: OptimizeRunIn,
     if p.missing():
         raise HTTPException(400, "missing optimizer inputs: {}".format(
             ", ".join(p.missing())))
+
+
+@app.post("/api/optimizer/run")
+def post_optimizer_run(body: OptimizeRunIn,
+                       db: Session = Depends(get_session)) -> Dict[str, Any]:
+    _refuse_a_run_now(db)
     try:
         run = optsvc.run(db, body.scenario_id, body.actor)
     except KeyError as e:
         raise HTTPException(404, str(e))
+    return optsvc.list_runs(db)[0] if run else {}
+
+
+@app.post("/api/optimizer/runs/{run_id}/refine")
+def refine_optimizer_run(run_id: int, actor: str = "planner",
+                         db: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Refine with v2: run v2 on a verified greedy run's Optimized Result, whatever
+    the Model input says (UI convention 12)."""
+    _refuse_a_run_now(db)
+    try:
+        run = optsvc.refine(db, run_id, actor)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
     return optsvc.list_runs(db)[0] if run else {}
 
 

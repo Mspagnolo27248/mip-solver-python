@@ -223,13 +223,20 @@ def update_params(db: Session, values: Dict[str, Any],
 
 
 # ------------------------------------------------------------------ running
-def run(db: Session, base_scenario_id: int, actor: str = "planner"
-        ) -> OptimizerRun:
+def run(db: Session, base_scenario_id: int, actor: str = "planner",
+        model_version: Optional[str] = None) -> OptimizerRun:
+    """Solve a scenario with the active optimizer inputs.
+
+    `model_version` overrides the Model input for this run only: Refine with v2
+    (`refine`) runs v2 whatever the input is set to.
+    """
     base = db.query(Scenario).get(base_scenario_id)
     if base is None:
         raise KeyError("no scenario {}".format(base_scenario_id))
     p = active_params(db)
     payload = params_dict(p)
+    chosen = model_version or p.model_version
+    payload["model_version"] = chosen
 
     run_row = OptimizerRun(base_scenario_id=base.id, created_by=actor,
                            params=payload, status="running")
@@ -260,10 +267,10 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner"
         # run records itself under the name asked for, so anything selectable in
         # the UI has to be here too.
         model = {"v0": v0, "v1": v1, "v2": v2,
-                 "greedy": greedy}.get(p.model_version or "v1", v1)
+                 "greedy": greedy}.get(chosen or "v1", v1)
         result = model.solve(ref, escn, spec, solver_params, horizon=dates,
                              downtime=downtime)
-        run_row.params = dict(payload, model_version=p.model_version)
+        run_row.params = dict(payload, model_version=chosen)
 
         run_row.solver = result.solver
         run_row.solve_seconds = result.solve_seconds
@@ -280,7 +287,7 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner"
             proved = result.status == "optimal"
             baseline = _baseline_kpis(ref, escn, spec, dates)
             new_id = _write_result_scenario(db, base, result, actor, run_row.id,
-                                            model_version=p.model_version)
+                                            model_version=chosen)
             run_row.result_scenario_id = new_id
 
             # Replay the proposed schedule through the simulator. The optimizer's
@@ -446,6 +453,42 @@ def rejected_result(db: Session, scenario_id: int) -> Optional[OptimizerRun]:
     return run if run is not None and run.status == "unverified" else None
 
 
+# ------------------------------------------------------------------ refining
+#: The model Refine with v2 runs on a greedy result.
+REFINE_MODEL = "v2"
+
+
+def refinable(run: OptimizerRun) -> Optional[str]:
+    """Why a run's Optimized Result can't be refined with v2, or None if it can.
+
+    Solving an Optimized Result again is refused everywhere else: the charge
+    floor is a fraction of whatever the model is given, so pass after pass
+    stacks a new minimum on every line-day and the model goes infeasible. One v2
+    pass on a verified greedy result is the exception the user chose (UI
+    convention 12). On scenario 48 at 42 days it lost 17.5% fewer gallons than
+    v2 on the plan in the same time (README, "Greedy first, then the MIP").
+    """
+    if (run.params or {}).get("model_version") != "greedy":
+        return "only a greedy run's Optimized Result can be refined with v2"
+    if run.status not in ("done", "not_proved_optimal"):
+        return ("run {} was not verified, so its result is not a starting point"
+                .format(run.id))
+    if run.result_scenario_id is None:
+        return "run {} has no Optimized Result".format(run.id)
+    return None
+
+
+def refine(db: Session, run_id: int, actor: str = "planner") -> OptimizerRun:
+    """Run v2 on a verified greedy run's Optimized Result."""
+    source = db.query(OptimizerRun).get(run_id)
+    if source is None:
+        raise KeyError("no run {}".format(run_id))
+    reason = refinable(source)
+    if reason:
+        raise ValueError(reason)
+    return run(db, source.result_scenario_id, actor, model_version=REFINE_MODEL)
+
+
 def scenario_labels(db: Session) -> Dict[int, Dict[str, Any]]:
     """What each scenario is called on screen, and which kind it is.
 
@@ -481,7 +524,7 @@ def scenario_labels(db: Session) -> Dict[int, Dict[str, Any]]:
         plan = names.get(pid, "scenario {}".format(pid))
         model = (run.params or {}).get("model_version") or "v0"
         out[sid] = {"kind": "optimized_result", "run_id": run.id,
-                    "run_status": run.status,
+                    "run_status": run.status, "model": model,
                     "label": "Run {} \u00b7 {} \u00b7 from {}".format(run.id, model, plan),
                     "plan_id": pid, "plan_label": plan}
     return out
@@ -492,6 +535,15 @@ def list_runs(db: Session, limit: int = 25) -> List[Dict[str, Any]]:
             .limit(limit).all())
     labels = scenario_labels(db)
     now = dt.datetime.utcnow()
+    # The runs already started from each listed run's result, so a card can say
+    # it has been refined before another 15-minute refinement is started.
+    refined_by: Dict[int, List[int]] = {}
+    results = [r.result_scenario_id for r in rows if r.result_scenario_id]
+    if results:
+        for child in (db.query(OptimizerRun)
+                      .filter(OptimizerRun.base_scenario_id.in_(results))
+                      .order_by(OptimizerRun.id)):
+            refined_by.setdefault(child.base_scenario_id, []).append(child.id)
     return [{
         "id": r.id, "created_at": as_utc(r.created_at),
         "created_by": r.created_by, "message": r.message,
@@ -516,6 +568,8 @@ def list_runs(db: Session, limit: int = 25) -> List[Dict[str, Any]]:
         "base_kind": labels.get(r.base_scenario_id, {}).get("kind"),
         "result_scenario_id": r.result_scenario_id,
         "result_scenario_label": labels.get(r.result_scenario_id, {}).get("label"),
+        "refinable": refinable(r) is None,
+        "refined_by": refined_by.get(r.result_scenario_id, []),
     } for r in rows]
 
 

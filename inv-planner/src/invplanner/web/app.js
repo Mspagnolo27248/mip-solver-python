@@ -1724,6 +1724,19 @@ async function loadOptRuns() {
             + `/schedule.xlsx?days=${days}`;
         },
       }, 'Export for Excel') : null,
+      // Refine with v2 (convention 12), offered once a greedy run is verified.
+      r.refinable ? el('button', {
+        class: 'btn ghost',
+        disabled: !!state.running,
+        title: 'Runs v2 starting from this greedy result instead of the plan. On one '
+          + 'plan at 42 days that lost 17.5% fewer gallons than v2 alone in the same '
+          + 'time. Takes up to the solver time limit.',
+        onclick: () => refineRun(r),
+      }, r.refined_by.length ? 'Refine with v2 again' : 'Refine with v2') : null,
+      r.refined_by && r.refined_by.length
+        ? el('span', { class: 'muted' },
+            `Refined as run ${r.refined_by.map((i) => `#${i}`).join(', ')}`)
+        : null,
       r.result_scenario_id ? el('button', {
         class: 'linkish danger',
         title: 'Delete this Optimized Result and this run card',
@@ -1751,26 +1764,46 @@ async function runOptimizer() {
     // Name the Current Plan at the root of the chain, not the scenario this one
     // came from - for a refined run that is another result, and pointing at it
     // sent the planner round the loop again.
-    toast(`“${state.scenario.label}” is an Optimized Result, so it can't be run `
-      + `again. Select its Current Plan, “${state.scenario.plan_label}”, and run that.`);
+    const s = state.scenario;
+    // A verified greedy result is the one that can go further: v2 on it.
+    const canRefine = s.model === 'greedy'
+      && ['done', 'not_proved_optimal'].includes(s.run_status);
+    toast(`“${s.label}” is an Optimized Result, so it can't be run again. `
+      + `Select its Current Plan, “${s.plan_label}”, and run that`
+      + (canRefine
+        ? ` - or refine this one with v2 from run #${s.run_id}'s card in Runs & results.`
+        : '.'));
     return;
   }
-  if (state.running) return;
   const base = state.scenario;
-  // The request only answers when the solve is over, so the button shows the
-  // run as solving now, from the inputs it is about to use. The server's own
-  // row replaces this as soon as the runs list has it.
+  await trackRun(base.label, null, () => api('/api/optimizer/run', {
+    method: 'POST',
+    body: JSON.stringify({ scenario_id: base.id }),
+  }));
+}
+
+/* Refine with v2, from a verified greedy run's card (convention 12): v2 on that
+   run's Optimized Result, whatever the Model input says. */
+async function refineRun(r) {
+  await trackRun(r.result_scenario_label, 'v2',
+    () => api(`/api/optimizer/runs/${r.id}/refine`, { method: 'POST' }));
+}
+
+/* Start a run and follow it - Run optimizer, and Refine with v2. The request only
+   answers when the solve is over, so the button shows the run as solving now,
+   from the inputs it is about to use; the server's own row replaces this as soon
+   as the runs list has it. `model` stands in for the Model input, as Refine does. */
+async function trackRun(baseLabel, model, send) {
+  if (state.running) return;
   const { params } = await api('/api/optimizer/params');
   state.running = {
-    base_scenario_label: base.label, created_at: new Date().toISOString(),
-    time_limit_seconds: params.time_limit_seconds, model_version: params.model_version,
+    base_scenario_label: baseLabel, created_at: new Date().toISOString(),
+    time_limit_seconds: params.time_limit_seconds,
+    model_version: model || params.model_version,
   };
   state.runPending = true;
   refreshRunButton();
-  const request = api('/api/optimizer/run', {
-    method: 'POST',
-    body: JSON.stringify({ scenario_id: base.id }),
-  });
+  const request = send();
   // the run row is committed before the solve starts, so the list can show it
   setTimeout(() => { if (state.runPending) loadOptRuns(); }, 1500);
   let run = null;
@@ -1781,8 +1814,8 @@ async function runOptimizer() {
   }
   state.runPending = false;
   state.running = null;
-  // Adds the new result to the picker without selecting it: the plan the run
-  // started from stays selected, so the next run starts from it too.
+  // Adds the new result to the picker without selecting it: what was selected
+  // stays selected, so the next run starts from it too.
   await loadScenarioList();
   await loadOptRuns();
   if (run && run.id) {

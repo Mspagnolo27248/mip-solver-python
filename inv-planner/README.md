@@ -153,7 +153,8 @@ walkthrough.
    blank grid is a known-bad input - `v0-42-blank` is recorded infeasible in
    `tests/baseline.json`.
 
-3. **Run greedy**, then **4. run v2 on greedy's result**, as below.
+3. **Run greedy**, then **4. refine its result with v2** (*Refine with v2* on the
+   run card), as below.
 
 On the walkthrough, greedy took scenario 64 from 8,863,918 gal of lost sales to
 947,712 in 2.5 seconds, verified.
@@ -235,8 +236,11 @@ proved optimality, so these are two incumbents at the same budget - a fair
 comparison, unlike an incumbent against a proved optimum. One scenario at one
 horizon, so treat it as promising rather than settled.
 
-To do it: run greedy, note `result_scenario_id`, switch Model back to `v2`, and
-run again against **that** scenario rather than the original plan.
+To do it: run greedy, then press **Refine with v2** on its run card. That runs v2
+on greedy's Optimized Result whatever *Model* is set to, and is offered only once
+the greedy run is verified. It is the one way to solve an Optimized Result again;
+Run optimizer still refuses one. The card says when a result has already been
+refined. Through the API it is `POST /api/optimizer/runs/{run_id}/refine`.
 
 **Known limits. Read these before trusting a run.**
 

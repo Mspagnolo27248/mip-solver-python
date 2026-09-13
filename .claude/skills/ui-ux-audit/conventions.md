@@ -80,7 +80,8 @@ Decided by the user after the plan and optimizer audit
     - The card offers no Export for Excel. (F2)
 12. **"Refine with v2" on verified greedy runs.** One action on the run card runs
     v2 on that Optimized Result. The general refusal to re-run an Optimized Result
-    stays. (F6)
+    stays. (F6) Built 2026-09-13: `optsvc.refinable`, and
+    `POST /api/optimizer/runs/{id}/refine`.
 13. **The picker separates Current Plans from Optimized Results, and scenarios can
     be deleted.**
     - Names are short and not nested, and the picker's width is capped.
