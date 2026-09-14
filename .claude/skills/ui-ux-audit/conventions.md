@@ -120,6 +120,27 @@ Decided by the user after the plan and optimizer audit
     - **A run card shows the optimizer settings it used**, because those settings
       are global and save when you finish with the box.
 
+### Decided on 2026-09-13
+
+15. **Three day-counts, three names.** They were sharing four words between them
+    (Window, Horizon, Days, Show), so a planner could not tell which number a
+    screen meant.
+
+    | Concept | Name | Where |
+    |---|---|---|
+    | How many days this view shows | **Show** | the filter label on all five planning views |
+    | How many days a run plans | **Solve window** | the preset in those filters, and the optimizer input formerly called "Detailed horizon" |
+    | How many days the scenario covers | **Plan length** | the line under the title, formerly "366 day horizon" |
+
+    - 366 days is "Whole plan" in every filter. It was "Full horizon" on alerts
+      and "Full year" on dashboards and projection.
+    - The solve window is a *setting*, not a constant, so nothing hard-codes 42.
+      The Charge schedule's fixed "42 days" option was removed rather than left
+      beside a preset that looks identical until the setting moves.
+    - A plan cannot promise its window: a run stops early if the charge schedule
+      runs out first (`cfg.clamp_horizon`). Screens say what is *set*, and the
+      run card reports what was actually solved.
+
 ---
 
 ## Open - vocabulary
@@ -130,7 +151,7 @@ workbook calls it.
 
 | Concept | Words in use | Where | Proposed |
 |---|---|---|---|
-| How many days a view shows | Window, Horizon, Days, Show, Detailed horizon; 366 = "Full horizon" / "Full year" | `#alert-window`, `#dash-days`, `#stream-days`, `#proj-days`, `#sched-days`, optimizer `horizon_days` | ? |
+| A range of days a write covers | "Set a rate across the window" (the From/To range of a fill) | `#view-schedule` fill panel | Now collides with rule 15's *solve window*. Propose "across a date range" |
 | First day a view shows | Start (7-day steps), From day (21-day steps) | `#stream-offset`, `#sched-offset` | ? |
 | Value as received / corrected / in use | Source / Override / Effective; Imported / Override / In use | `loadFeedRows`, `loadReferenceRows` | ? |
 | Undo a correction | clear / reset; pill "overridden" / "edited" | same two tables | ? |

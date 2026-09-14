@@ -137,9 +137,15 @@ LABELS = {
         "schedule by rule in under a second and cannot tell you how far from "
         "best it is, so read its verification and campaign shape rather than "
         "an objective."),
-    "horizon_days": ("Detailed horizon", "days",
-                     "Firm orders cover about 57 days; beyond that demand is "
-                     "pure forecast."),
+    # Named for what it does, not for how it is implemented. "Detailed
+    # horizon" collided with the word four planning filters used for "how
+    # many days am I looking at", which is a different question; the
+    # scenario's own 366 days is a third. Decided by the user 2026-09-13.
+    "horizon_days": ("Solve window", "days",
+                     "How many days each run plans, counted from the plan's "
+                     "first day. Firm orders cover about 57 days; beyond that "
+                     "demand is pure forecast. A run stops earlier if the "
+                     "charge schedule runs out before the window does."),
     "time_limit_seconds": ("Solver time limit", "seconds", ""),
     "mip_gap": ("Accepted gap, as a fraction", "fraction",
                 "Stop when within this fraction of proven optimal. Leave at "
@@ -285,7 +291,10 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner",
         # is a separate claim and `not_proved_optimal` keeps it visible.
         if result.status in ("optimal", "feasible"):
             proved = result.status == "optimal"
-            baseline = _baseline_kpis(ref, escn, spec, dates)
+            # Not `dates`: the model may have solved fewer days than were asked
+            # for. See `_solved_window`.
+            scored = _solved_window(dates, result)
+            baseline = _baseline_kpis(ref, escn, spec, scored)
             new_id = _write_result_scenario(db, base, result, actor, run_row.id,
                                             model_version=chosen)
             run_row.result_scenario_id = new_id
@@ -296,7 +305,7 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner",
             # same physics and is the referee.
             proposed = db.query(Scenario).get(new_id)
             check = verify.verify(ref, svc.engine_scenario(db, proposed),
-                                  result.kpis, dates, spec, downtime=downtime)
+                                  result.kpis, scored, spec, downtime=downtime)
             run_row.kpis = {"baseline": baseline, "optimized": result.kpis,
                             "verification": check, "proved_optimal": proved}
             if not check["verified"]:
@@ -313,6 +322,32 @@ def run(db: Session, base_scenario_id: int, actor: str = "planner",
                               "objective": run_row.objective}))
     db.commit()
     return run_row
+
+
+def _solved_window(dates, result) -> List[dt.date]:
+    """The days the model actually planned, which is not always the days asked for.
+
+    Both models cut the horizon back to the last day the planner has filled in a
+    charge (`cfg.clamp_horizon`) and report what is left as `kpis["days"]`.
+    Scoring the plan and refereeing the answer over the days *asked for* then
+    measures two different windows against each other, and the longer window is
+    always the baseline's - so the comparison flatters the optimizer by exactly
+    the demand sitting in the days it never planned.
+
+    On the seed plan at 180 days it cut to 162 and reported lost sales down 4.4%
+    against an 18.8 M gal baseline. Over the 162 days both sides really covered,
+    the baseline is 15.0 M and the run is 19.6% *worse*. The sign was wrong, in
+    the direction that makes the tool look good, which is the one direction a
+    referee must never fail in.
+
+    Falls back to the full window when the model reported nothing usable. That is
+    the old behaviour, and it is right here: a model that cannot say what it
+    solved has not earned a narrower window being assumed on its behalf.
+    """
+    days = (result.kpis or {}).get("days")
+    if isinstance(days, (int, float)) and 0 < int(days) <= len(dates):
+        return dates[:int(days)]
+    return dates
 
 
 def _baseline_kpis(ref, escn, spec, dates) -> Dict[str, Any]:
@@ -573,6 +608,19 @@ def list_runs(db: Session, limit: int = 25) -> List[Dict[str, Any]]:
     } for r in rows]
 
 
+def _solved_days(run: OptimizerRun) -> Optional[int]:
+    """Days the run covered, or `None` when it never got far enough to say.
+
+    Read off the result rather than the run's own parameters: a run whose
+    horizon was clamped back to the last day the planner had filled in solved
+    fewer days than it was asked for, and the clamped figure is the one that
+    describes the schedule sitting in the scenario.
+    """
+    opt = ((run.kpis or {}).get("optimized") or {})
+    days = opt.get("days")
+    return int(days) if isinstance(days, (int, float)) and days > 0 else None
+
+
 def pair_for(db: Session, scenario_id: int) -> Dict[str, Any]:
     """The other half of a Current Plan / Optimized Result pair, whichever half
     you hold.
@@ -591,7 +639,14 @@ def pair_for(db: Session, scenario_id: int) -> Dict[str, Any]:
         return {"role": "optimized_result", "run_id": run.id,
                 "run_status": run.status, "other_id": run.base_scenario_id,
                 "other_role": other.get("kind", "current_plan"),
-                "other_label": other.get("label")}
+                "other_label": other.get("label"),
+                # How many days this run actually solved, counted from the
+                # scenario's `as_of`. The result carries the whole grid - the
+                # days past this one are the copied plan, which the optimizer
+                # never touched and the referee never scored - so the planning
+                # side needs the real number rather than the live input, which
+                # may have been changed since the run.
+                "solved_days": _solved_days(run)}
     run = (db.query(OptimizerRun)
            .filter(OptimizerRun.base_scenario_id == scenario_id,
                    OptimizerRun.result_scenario_id.isnot(None))

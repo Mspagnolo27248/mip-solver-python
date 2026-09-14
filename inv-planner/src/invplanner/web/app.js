@@ -14,6 +14,8 @@ const state = {
   feed: null,
   uploads: [],
   schedOffset: 0,
+  // Days the optimizer solves. See `solveWindow`.
+  solveDays: null,
   dashGroups: null,
   dashGroup: null,
   refKind: null,
@@ -229,6 +231,7 @@ async function boot() {
   // usually an Optimized Result, which the run button then refuses.
   const first = state.scenarios.find((s) => s.kind !== 'optimized_result')
     || state.scenarios[0];
+  await loadSolveWindow();
   $('#scenario-select').value = first.id;
   await selectScenario(first.id);
 }
@@ -242,7 +245,7 @@ async function selectScenario(id) {
     ? `Optimized Result of run ${s.run_id}${s.run_status === 'unverified' ? ' (unverified)' : ''}`
     : 'Current Plan';
   $('#scenario-meta').textContent =
-    `${what} · as of ${s.as_of} · ${s.horizon_days} day horizon · reference v${s.reference_version_id}`;
+    `${what} · as of ${s.as_of} · plan length ${s.horizon_days} days · reference v${s.reference_version_id}`;
   // Beside the line that says which kind is selected, so the link can say it too.
   const del = $('#delete-scenario');
   del.hidden = false;
@@ -261,6 +264,8 @@ async function selectScenario(id) {
   for (let i = 0; i < state.scenario.horizon_days; i += 21) {
     offSel.appendChild(el('option', { value: i }, `day ${i + 1}`));
   }
+  // A result carries its run's own window; a plan carries the live setting.
+  refreshSolveOptions();
   refreshRunButton();
   await refreshActive();
 }
@@ -337,10 +342,100 @@ async function refreshActive() {
   else if (v === 'optruns') await loadOptRuns();
 }
 
+/* -------------------------------------------------------- the solve window */
+/* The optimizer does not plan the whole scenario. It solves `horizon_days` from
+ * the plan's `as_of` - 42 by default - and every day after that is untouched:
+ * on a Current Plan those are the days the next run will not reach, and on an
+ * Optimized Result they are the plan's own schedule, copied in and never scored
+ * by the referee.
+ *
+ * Nothing on the planning side said so. A planner reading day 80 of a result
+ * was reading their own numbers back and taking them for the optimizer's, which
+ * is the failure worth preventing: it looks exactly like an answer.
+ *
+ * One name for it in every view - the solve window - as a preset on each day
+ * filter and as a line in the grid where the window ends.
+ */
+function solveWindow() {
+  const s = state.scenario;
+  // A result's window is a fact about the run that made it, and the run's own
+  // count is the clamped one. A plan's window is a prediction about the run it
+  // has not had yet, so it follows the live input and moves when that is edited.
+  const solved = s && s.pair && s.pair.solved_days;
+  if (solved) return { days: solved, run: s.pair.run_id };
+  return { days: state.solveDays, run: null };
+}
+
+function solveWindowNote() {
+  const w = solveWindow();
+  if (!w.days) return '';
+  return w.run
+    ? `Run ${w.run} solved the first ${plural(w.days, 'day')} of this scenario. `
+      + 'Every day after that is the plan it started from, copied across '
+      + 'unchanged - the optimizer never chose it and the simulator never '
+      + 'checked it.'
+    : `The optimizer is set to solve the first ${plural(w.days, 'day')} of `
+      + 'this plan, and stops earlier if the schedule runs out before then. '
+      + 'Days after that are left as they are. Change it with Solve '
+      + 'window on Optimizer inputs.';
+}
+
+/* Every day filter that can show the window offers it by name. Built here
+   rather than written into the HTML because the length is a setting, not a
+   constant, and a stale "42" in a label is worse than no preset at all. */
+const WINDOW_FILTERS = ['#alert-window', '#dash-days', '#stream-days',
+  '#proj-days', '#sched-days'];
+
+function refreshSolveOptions() {
+  const w = solveWindow();
+  for (const sel of WINDOW_FILTERS) {
+    const node = $(sel);
+    if (!node) continue;
+    const had = node.querySelector('option[value="solve"]');
+    if (!w.days) {
+      // Offering a window nobody can size is worse than not offering one: the
+      // request would fall through as NaN and the view would come back empty.
+      if (had) {
+        if (had.selected) node.value = node.options[had.index + 1]?.value || '';
+        had.remove();
+      }
+      continue;
+    }
+    const opt = had || el('option', { value: 'solve' });
+    opt.textContent = `Solve window (${plural(w.days, 'day')})`;
+    opt.title = solveWindowNote();
+    if (!had) node.insertBefore(opt, node.firstChild);
+  }
+}
+
+async function loadSolveWindow() {
+  const d = await api('/api/optimizer/params');
+  state.solveDays = d.params.horizon_days || null;
+  refreshSolveOptions();
+}
+
+/* What a day filter is really asking for. `solve` is the only value that is not
+   already a number of days. */
+const windowDays = (sel) => {
+  const v = $(sel).value;
+  return v === 'solve' ? solveWindow().days : Number(v);
+};
+
+/* Where to draw the edge of the window, as an index into the dates on screen -
+   or -1 for "do not draw it". A rule on the last column shown says nothing a
+   reader can act on, and one off either end would be a lie, so both are refused
+   here rather than in four render functions. */
+function solveEdge(dates, offset = 0) {
+  const w = solveWindow();
+  if (!w.days || !dates || !dates.length) return -1;
+  const i = w.days - 1 - Number(offset || 0);
+  return i >= 0 && i < dates.length - 1 ? i : -1;
+}
+
 /* ---------------------------------------------------------------- alerts */
 async function loadAlerts() {
   if (!state.scenario) return;
-  const days = $('#alert-window').value;
+  const days = windowDays('#alert-window');
   const data = await api(`/api/scenarios/${state.scenario.id}/alerts?days=${days}`);
   const a = data.alerts;
 
@@ -391,11 +486,16 @@ function stat(n, label, kind) {
     el('div', { class: 'n' }, fmt(n)), el('div', { class: 'l' }, label));
 }
 
-function table(headers, rows, stickyCols = []) {
+/* `edgeCol` is the header index the solve window closes on, or -1 for none. A
+   header index rather than a date index because `table` knows nothing about
+   dates - the caller has the row-label columns to account for. */
+function table(headers, rows, stickyCols = [], edgeCol = -1) {
   const thead = el('thead', {}, el('tr', {},
     headers.map((h, i) => el('th', {
       class: [stickyCols.includes(i) ? 'sticky' : '',
-              i >= 1 && /\(|days|Days/.test(h) ? 'num' : ''].join(' ').trim(),
+              i >= 1 && /\(|days|Days/.test(h) ? 'num' : '',
+              i === edgeCol ? 'solve-edge' : ''].join(' ').trim(),
+      title: i === edgeCol ? solveWindowNote() : null,
     }, h))));
   return el('table', {}, thead, el('tbody', {}, rows));
 }
@@ -429,7 +529,7 @@ async function loadDashboard() {
   document.querySelectorAll('.group-tab').forEach((b) =>
     b.classList.toggle('active', b.dataset.group === state.dashGroup));
 
-  const days = $('#dash-days').value;
+  const days = windowDays('#dash-days');
   const d = await api(`/api/scenarios/${state.scenario.id}/dashboard`
     + `?group=${state.dashGroup}&days=${days}`);
 
@@ -516,6 +616,12 @@ function miniChart(p) {
     + `fill="var(--accent)" opacity="0.12"/>`);
   parts.push(`<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.8"/>`);
 
+  // No solve-window marker here on purpose. The tile is 360px wide with no
+  // legend and no room for one, so the line arrived as an unexplained rule
+  // across 18 charts at once - indistinguishable from a tank project or a
+  // turnaround, which are the things a reader would take it for. The Show
+  // filter names the window in words instead.
+
   // month ticks, unlabelled - the axis range is in the header
   let lastMonth = null;
   p.dates.forEach((iso, i) => {
@@ -539,7 +645,7 @@ async function loadStream() {
   if (!state.scenario) return;
   const sheet = $('#stream-select').value;
   if (!sheet) return;
-  const days = $('#stream-days').value;
+  const days = windowDays('#stream-days');
   const offset = $('#stream-offset').value || 0;
   const keyOnly = $('#stream-key-rows').checked;
   const d = await api(`/api/scenarios/${state.scenario.id}/stream`
@@ -549,12 +655,17 @@ async function loadStream() {
   const esc = (s) => String(s).replace(/[&<>]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
+  const edge = solveEdge(d.dates, offset);
+  const edgeCls = (i) => (i === edge ? ' solve-edge' : '');
+  const edgeTitle = esc(solveWindowNote());
+
   const head = ['<thead><tr>',
     '<th class="sticky sticky-1">Product</th>',
     '<th class="sticky sticky-2">Measure</th>',
-    d.dates.map((iso) => {
+    d.dates.map((iso, i) => {
       const dow = new Date(iso + 'T00:00:00').getDay();
-      return `<th class="num${dow === 0 || dow === 6 ? ' weekend' : ''}">${shortDate(iso)}</th>`;
+      return `<th class="num${dow === 0 || dow === 6 ? ' weekend' : ''}${edgeCls(i)}"`
+        + `${i === edge ? ` title="${edgeTitle}"` : ''}>${shortDate(iso)}</th>`;
     }).join(''),
     '</tr></thead>'].join('');
 
@@ -579,7 +690,7 @@ async function loadStream() {
       const cls = isEnd ? ' row-end' : (m === 'Begin Inventory' ? ' row-begin' : '');
       const cells = r.values.map((v, i) => {
         const f = b.flags[i] || {};
-        let c = 'num';
+        let c = 'num' + edgeCls(i);
         if (isEnd && f.dry) c += ' cell-dry';
         else if (isEnd && f.over) c += ' cell-over';
         else if (v < 0) c += ' neg';
@@ -617,7 +728,7 @@ async function populateStreams() {
 /* ------------------------------------------------------------ projection */
 async function loadProjection() {
   if (!state.scenario || !state.block) return;
-  const days = $('#proj-days').value;
+  const days = windowDays('#proj-days');
   const d = await api(
     `/api/scenarios/${state.scenario.id}/projection?block_id=${encodeURIComponent(state.block)}&days=${days}`);
   drawChart(d);
@@ -660,6 +771,15 @@ function drawChart(d) {
   parts.push(`<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"/>`);
   parts.push(`<polygon points="${x(0)},${y(Math.max(lo, 0))} ${pts} ${x(rows.length - 1)},${y(Math.max(lo, 0))}" fill="var(--accent)" opacity="0.10"/>`);
 
+  // The solve window closes here. Drawn after the series so it reads as an
+  // annotation on the curve rather than another measured line.
+  const edge = solveEdge(rows.map((r) => r.date));
+  if (edge >= 0) {
+    parts.push(line(x(edge), P.t, x(edge), H - P.b, 'var(--accent)', 1.5, '5 4'));
+    parts.push(`<text class="axis-text" x="${x(edge) + 5}" y="${P.t + 11}" `
+      + `fill="var(--accent)">solve window ends</text>`);
+  }
+
   // month ticks
   let lastMonth = null;
   rows.forEach((r, i) => {
@@ -682,6 +802,11 @@ function drawChart(d) {
     legend('var(--accent)', 'Ending inventory'),
     legend('var(--warn)', 'Tank capacity'),
     ...(d.lcl != null ? [legend('var(--ok)', 'Control band (LCL/UCL)')] : []),
+    ...(edge >= 0
+      ? [el('span', { title: solveWindowNote() },
+          el('i', { class: 'dashed' }),
+          `Solve window ends ${shortDate(rows[edge].date)}`)]
+      : []),
     el('span', {}, `${d.code} — ${d.name}`),
   );
 }
@@ -693,10 +818,14 @@ const legend = (color, label) =>
   el('span', {}, el('i', { style: `background:${color}` }), label);
 
 function drawProjTable(d) {
-  const rows = d.rows.map((r) => {
+  const edge = solveEdge(d.rows.map((r) => r.date));
+  const rows = d.rows.map((r, i) => {
     const over = r.capacity > 0 && r.end > r.capacity;
     const neg = r.end < 0;
-    return el('tr', {},
+    return el('tr', {
+      class: i === edge ? 'solve-edge-row' : null,
+      title: i === edge ? solveWindowNote() : null,
+    },
       el('td', { class: 'sticky' }, shortDate(r.date)),
       el('td', { class: 'num' }, fmt(r.begin)),
       el('td', { class: 'num' }, fmt(r.production_in)),
@@ -720,7 +849,7 @@ function drawProjTable(d) {
 /* -------------------------------------------------------------- schedule */
 async function loadSchedule() {
   if (!state.scenario) return;
-  const days = $('#sched-days').value;
+  const days = windowDays('#sched-days');
   const offset = $('#sched-offset').value || 0;
   const pair = state.scenario.pair || {};
   const q = `days=${days}&offset=${offset}`
@@ -731,10 +860,14 @@ async function loadSchedule() {
 
   const head = ['Unit / charge product', ...d.dates.map(shortDate)];
   const rows = [];
+  // The last day the optimizer reaches, so the grid says where its answer stops
+  // and the planner's own schedule takes over again.
+  const edge = solveEdge(d.dates, offset);
+  const edgeCls = (i) => (i === edge ? ' solve-edge' : '');
 
-  const crudeCells = d.dates.map((iso) => {
+  const crudeCells = d.dates.map((iso, i) => {
     const c = d.crude[iso] || {};
-    return el('td', { class: 'num' },
+    return el('td', { class: 'num' + edgeCls(i) },
       el('input', {
         class: 'cell-input' + (c.bbl ? ' on' : ''), type: 'number', value: c.bbl || '',
         title: `Crude charge ${iso}`,
@@ -744,9 +877,9 @@ async function loadSchedule() {
   });
   rows.push(el('tr', {}, el('td', { class: 'sticky' }, 'Crude unit — charge (bbl)'), crudeCells));
 
-  const modeCells = d.dates.map((iso) => {
+  const modeCells = d.dates.map((iso, i) => {
     const c = d.crude[iso] || {};
-    return el('td', { class: 'num' },
+    return el('td', { class: 'num' + edgeCls(i) },
       el('button', {
         class: 'linkish ' + (c.mode ? `mode-${c.mode}` : ''),
         title: 'R = regular (makes 9117) · L = low volatility (makes 9118)',
@@ -765,7 +898,7 @@ async function loadSchedule() {
     // Downtime toggle row: the planner's switch for "this unit cannot run".
     rows.push(el('tr', { class: 'sched-downtime' },
       el('td', { class: 'sticky' }, 'Down'),
-      d.dates.map((iso) => el('td', { class: 'num' },
+      d.dates.map((iso, i) => el('td', { class: 'num' + edgeCls(i) },
         el('button', {
           class: 'dt-cell' + (down.has(iso) ? ' on' : ''),
           title: down.has(iso)
@@ -775,7 +908,7 @@ async function loadSchedule() {
         }, down.has(iso) ? '×' : '·')))));
 
     for (const lineRow of unit.lines) {
-      const cells = d.dates.map((iso) => {
+      const cells = d.dates.map((iso, i) => {
         const v = lineRow.values[iso] || 0;
         const isDown = down.has(iso);
         // Comparing: show the other schedule under the cell and mark the day if
@@ -784,7 +917,8 @@ async function loadSchedule() {
         const other = lineRow.compare ? (lineRow.compare[iso] || 0) : null;
         const differs = other !== null && Math.abs(v - other) > 0.5;
         return el('td', {
-          class: 'num' + (isDown ? ' cell-down' : '') + (differs ? ' cell-diff' : ''),
+          class: 'num' + (isDown ? ' cell-down' : '') + (differs ? ' cell-diff' : '')
+                 + edgeCls(i),
         },
           el('input', {
             class: 'cell-input' + (v ? ' on' : ''), type: 'number', value: v || '',
@@ -805,9 +939,41 @@ async function loadSchedule() {
         el('td', { class: 'sticky' }, `${lineRow.code} ${lineRow.name || ''}`), cells));
     }
   }
-  $('#schedule-grid').replaceChildren(table(head, rows, [0]));
+  // +1 for the unit/product column the dates sit beside.
+  $('#schedule-grid').replaceChildren(
+    table(head, rows, [0], edge >= 0 ? edge + 1 : -1));
+  drawWindowNote(d.dates, offset);
   drawDowntime(d);
   drawFill(d);
+}
+
+/* The window in words, beside the grid that draws it. The marker says where the
+   optimizer stops; this says what that means and which setting moves it. Said
+   whether or not the marker is on screen, because a planner scrolled past day
+   42 is exactly the one who needs telling. */
+function drawWindowNote(dates, offset) {
+  const host = $('#sched-window-note');
+  const w = solveWindow();
+  if (!host) return;
+  if (!w.days) { host.hidden = true; return; }
+  const s = state.scenario;
+  const last = new Date(Date.parse(`${s.as_of}T00:00:00Z`)
+    + (w.days - 1) * 86400000).toISOString().slice(0, 10);
+  const shown = solveEdge(dates, offset) >= 0;
+  host.hidden = false;
+  host.title = solveWindowNote();
+  // A finished run reports what it did; a plan can only report what is *set*.
+  // A run stops early if the schedule runs out before the window does
+  // (`cfg.clamp_horizon`), so promising the end date here would be a promise
+  // the page cannot keep - and the planner would only find out from the run.
+  host.textContent = w.run
+    ? `Run ${w.run} solved ${s.as_of} to ${last} (${plural(w.days, 'day')})`
+      + `${shown ? ', marked in the grid' : ''}. Later days are the plan it `
+      + 'started from, copied across - not optimized, not verified.'
+    : `The optimizer is set to solve ${s.as_of} to ${last} `
+      + `(${plural(w.days, 'day')})${shown ? ', marked in the grid' : ''}, and `
+      + 'stops earlier if the schedule runs out before then. Later days are '
+      + 'left as they are.';
 }
 
 /* ------------------------------------------------------------------ fill */
@@ -1019,7 +1185,7 @@ async function removeDowntime(wnd) {
    it, and a forced recalculation ran for 28 minutes before it had to be killed. */
 function exportSchedule() {
   if (!state.scenario) return;
-  const days = $('#sched-days').value;
+  const days = windowDays('#sched-days');
   const offset = $('#sched-offset').value || 0;
   window.location = `/api/scenarios/${state.scenario.id}`
     + `/schedule.xlsx?days=${days}&offset=${offset}`;
@@ -1438,12 +1604,16 @@ async function resetReference(r) {
 async function loadOptParams() {
   const d = await api('/api/optimizer/params');
   const p = d.params;
+  // Editing Solve window here moves it on every planning view, so
+  // the presets are rebuilt from the value that was actually stored.
+  state.solveDays = p.horizon_days || null;
+  refreshSolveOptions();
 
   $('#opt-ready').replaceChildren(
     stat(p.ready ? 'Ready' : p.missing.length, p.ready
       ? 'all inputs supplied' : 'input(s) still needed',
       p.ready ? 'ok' : 'danger'),
-    stat(p.horizon_days, 'day detailed horizon', 'info'),
+    stat(p.horizon_days, 'day solve window', 'info'),
     stat(p.time_limit_seconds, 'second solve limit', 'info'),
   );
 
@@ -1935,10 +2105,18 @@ $('#product-select').addEventListener('change', (e) => {
 });
 $('#dash-days').addEventListener('change', loadDashboard);
 $('#stream-select').addEventListener('change', loadStream);
-$('#stream-days').addEventListener('change', loadStream);
+$('#stream-days').addEventListener('change', (e) => {
+  // The window is measured from the plan's start date, so showing it from
+  // day 22 would show 21 days of it and call that the window.
+  if (e.target.value === 'solve') $('#stream-offset').value = 0;
+  loadStream();
+});
 $('#stream-offset').addEventListener('change', loadStream);
 $('#stream-key-rows').addEventListener('change', loadStream);
-$('#sched-days').addEventListener('change', loadSchedule);
+$('#sched-days').addEventListener('change', (e) => {
+  if (e.target.value === 'solve') $('#sched-offset').value = 0;
+  loadSchedule();
+});
 $('#sched-offset').addEventListener('change', loadSchedule);
 $('#fill-target').addEventListener('change', fillTargetChanged);
 $('#fill-apply').addEventListener('click', applyFill);

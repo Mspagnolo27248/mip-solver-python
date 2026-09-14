@@ -1375,3 +1375,44 @@ def test_refine_with_v2_runs_v2_on_a_verified_greedy_result_only(db, monkeypatch
         assert calls == [(result_id, "v2")]
     finally:
         app.dependency_overrides.clear()
+
+
+def test_a_clamped_run_scores_both_sides_over_the_days_it_solved(db):
+    """The comparison on a run card must divide two numbers that mean the same
+    thing.
+
+    `cfg.clamp_horizon` cuts a run back to the last day the planner has filled in
+    a charge, so a horizon set past that produces a schedule shorter than the one
+    asked for. Scoring the plan over the full request and the answer over the
+    clamped window inflates the baseline by whatever demand sits in the days the
+    model never planned - and only the baseline, so the run always reads better
+    than it is. On the seed plan at 180 days that reported lost sales down 4.4%
+    on what is really a 19.6% regression.
+
+    Driven through `optsvc.run` rather than its helpers: the helpers were never
+    what was wrong, the window handed to them was.
+    """
+    import datetime as dt
+
+    from invplanner.db import optimizer_service as optsvc
+    from invplanner.db import service as svc
+
+    # Past the seed plan's last filled-in charge (2026-12-31), so the clamp fires.
+    base = svc.create_scenario(db, "clamped window", dt.date(2026, 7, 23), 180, "test")
+    before = optsvc.params_dict(optsvc.active_params(db))
+    optsvc.update_params(db, {"model_version": "greedy", "horizon_days": 180}, "test")
+    try:
+        run = optsvc.run(db, base.id, actor="test")
+        assert run.status != "error", run.message
+        k = run.kpis or {}
+        assert k, run.message
+
+        solved = k["optimized"]["days"]
+        assert solved < 180, ("nothing clamped; the seed schedule must have "
+                              "grown - pick a horizon past its last charge")
+        # The referee and the plan both measured over exactly those days.
+        assert k["baseline"]["days"] == solved
+        assert k["optimized"]["horizon_truncated_days"] == 180 - solved
+    finally:
+        optsvc.update_params(db, {k: before[k] for k in
+                                  ("model_version", "horizon_days")}, "test")

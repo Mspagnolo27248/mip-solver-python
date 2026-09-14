@@ -34,7 +34,7 @@ memory, so a reload resets them.
 | Selected scenario | `#scenario-picker`, and several actions that change it for you (section 4) | The newest Current Plan |
 
 The line under the title (`#scenario-meta`) starts with the kind - "Current Plan" or
-"Optimized Result of run *N*" - then "as of *date* · *N* day horizon · reference
+"Optimized Result of run *N*" - then "as of *date* · plan length *N* days · reference
 v*N*". The picker has two groups, Current Plans then Optimized Results, each newest
 first. A result is labelled from its run, "Run 72 · greedy · from Plan 2026-09-13"
 (`scenario_labels`), with the stored name in the option's tooltip, and the picker's
@@ -50,10 +50,10 @@ This is the question a planner most often can't answer from the screen.
 |---|---|---|---|
 | Source data: the six feeds (uploads, sync, overrides) | Source data | One global copy | **Only when a scenario is created.** The scenario freezes the values then. Later uploads, syncs and overrides never reach existing scenarios |
 | Model inputs: yields, rates, capacities, control limits | Model inputs | One global copy | **Straight away, in every scenario.** Each edit clears every scenario's cached projection (`patch_reference`), including Optimized Results scored before the edit |
-| Optimizer inputs | Optimizer inputs | One global set | Every run started afterwards, on any scenario |
+| Optimizer inputs | Optimizer inputs | One global set | Every run started afterwards, on any scenario. *Solve window* also moves the window shown on all five planning filters |
 | Charge schedule, crude rate and mode, planned downtime | Charge schedule | This scenario | Straight away; each cell saves when you leave it |
 | Opening inventory, orders and forecast inside a scenario | Nowhere | This scenario, frozen when it was created | Can't be edited. Make a new scenario |
-| Plan date (`as_of`) and horizon (366 days) | The New Current Plan form only | This scenario | Can't be changed after creation. The plan can be deleted (section 6) |
+| Plan date (`as_of`) and plan length (366 days) | The New Current Plan form only | This scenario | Can't be changed after creation. The plan can be deleted (section 6) |
 | Optimizer runs | Runs & results | One global list, last 25, not filtered by scenario; one run at a time | Each lands as an Optimized Result (a scenario with status `proposed`) |
 
 ⚠ The header scenario picker stays visible on the three global tabs: Source data,
@@ -248,29 +248,37 @@ The controls on each screen and what they touch. "Display" means the control cha
 only what is shown.
 
 **Capacity & alerts** (`#view-alerts`)
-- Window: 10 / 14 / 30 / 90 days / Full horizon (display).
+- Show: Solve window / 10 / 14 / 30 / 90 days / Whole plan (display).
 - Stats: products run dry, products overflow tank, outside control band, products clear.
 - Table rows are clickable, and open the projection.
 
 **Dashboards** (`#view-dashboard`)
 - Group pills (display, remembered across scenarios).
-- Horizon: 3 / 6 / 9 months / Full year.
+- Show: Solve window / 3 / 6 / 9 months / Whole plan.
+- The tiles carry no solve-window marker: too small to label one.
 - Chart cards are buttons that open the projection.
 
 **Stream sheet** (`#view-stream`)
 - Stream: sheet name and product count.
-- Start: day *N*, in 7-day steps.
-- Days: 14 / 21 / 30 / 60.
+- Start: day *N*, in 7-day steps. Picking the solve window resets it to day 1.
+- Show: Solve window / 14 / 21 / 30 / 60.
+- The last day of the solve window carries a right border in the grid.
 - Key rows only.
 - Read-only grid with no links out.
 
 **Inventory projection** (`#view-projection`)
 - Product: resets to the first product when the scenario changes.
-- Horizon: 30 / 60 / 120 days / Full year.
-- A chart, then a daily table. Read-only.
+- Show: Solve window / 30 / 60 / 120 days / Whole plan.
+- A chart, then a daily table. Read-only. The solve window ends at a dashed
+  line on the chart, named in the legend, and at a bottom border on that row of
+  the table.
 
 **Charge schedule** (`#view-schedule`)
-- From day: 21-day steps. Show: 14 / 21 / 42 / 100 days.
+- From day: 21-day steps. Picking the solve window resets it to day 1.
+  Show: Solve window / 14 / 21 / 100 days.
+- Under the heading, a line saying which days the window covers: what a run
+  already solved, or what the next run is set to solve. The last day of the
+  window carries a right border in the grid.
 - **Planned downtime** panel (collapsed): Unit, From, To, Reason, Add; a list with
   detected/confirmed pills and remove.
 - **Set a rate across the window** panel (collapsed):
@@ -305,7 +313,7 @@ only what is shown.
   Imported / Override / In use / Status / By / reset.
 
 **Optimizer inputs** (`#view-optparams`)
-- Stats: Ready or inputs needed, horizon, solve limit.
+- Stats: Ready or inputs needed, solve window, solve limit.
 - Three groups: What things are worth; How much freedom the model has; Solver.
 - Rows: Input / Value (a number box, or a select for model, objective and must-run) /
   Unit / Status / help.

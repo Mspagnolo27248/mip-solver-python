@@ -358,6 +358,19 @@ td.num.bad  { color: var(--danger); }
 .cell-compare.differs { color: var(--warn); font-weight: 600; }
 td.cell-diff { background: var(--warn-soft); }
 
+/* Where the optimizer's window closes. A right border on the last day it
+   reaches, in the accent colour so it reads as an annotation rather than as
+   another table rule - the grid is full of borders already, and a heavier grey
+   one would be taken for a section break. Drawn on the header too, so it is
+   visible before anyone scrolls into the body. */
+th.solve-edge, td.solve-edge { border-right: 2px solid var(--accent); }
+/* The projection lists days down the page instead of across it. */
+tr.solve-edge-row > td { border-bottom: 2px solid var(--accent); }
+.legend i.dashed {
+  height: 0; background: none; border-top: 2px dashed var(--accent);
+  border-radius: 0;
+}
+
 /* ---- runs: one at a time, why each ended, and what it was given ---- */
 .btn:disabled { cursor: progress; opacity: .75; filter: none; transform: none; }
 .run-message { margin: 0; color: var(--muted); font-size: 13px; max-width: 110ch; }
