@@ -1,0 +1,1216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Source of the published artifact of the same name. Self-contained:
+     open it in any browser, no build step and no server. Google Fonts is
+     the one external request; it degrades to the declared fallback stacks
+     offline. -->
+<title>Inventory Planner Field Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#eceff0; --surface:#f7faf9; --raise:#ffffff;
+  --ink:#14262a; --ink-soft:#3d565b; --muted:#6b8085;
+  --rule:#c3d0d1; --rule-soft:#dde5e5;
+  --primary:#0d3b45; --primary-wash:#dfeaeb;
+  --accent:#a96a0c; --accent-wash:#f6ecd8;
+  --bad:#94282a; --bad-wash:#f6e3e2;
+  --ok:#26624f;
+  --mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  --sans:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0c1517; --surface:#131f22; --raise:#1a2a2e;
+    --ink:#dce8e7; --ink-soft:#a6bcbd; --muted:#7c9395;
+    --rule:#2b3f44; --rule-soft:#213136;
+    --primary:#79c0cb; --primary-wash:#1a3239;
+    --accent:#dda343; --accent-wash:#31250f;
+    --bad:#e28a88; --bad-wash:#381d1d;
+    --ok:#6cbda2;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0c1517; --surface:#131f22; --raise:#1a2a2e;
+  --ink:#dce8e7; --ink-soft:#a6bcbd; --muted:#7c9395;
+  --rule:#2b3f44; --rule-soft:#213136;
+  --primary:#79c0cb; --primary-wash:#1a3239;
+  --accent:#dda343; --accent-wash:#31250f;
+  --bad:#e28a88; --bad-wash:#381d1d;
+  --ok:#6cbda2;
+}
+*{box-sizing:border-box}
+html{color-scheme:light}
+@media (prefers-color-scheme:dark){html{color-scheme:dark}}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+body{background:var(--paper);color:var(--ink);font-family:var(--serif);
+  font-size:16.5px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1220px;margin:0 auto;padding:0 24px 96px;
+  display:grid;grid-template-columns:1fr;gap:0}
+@media (min-width:1040px){
+  .wrap{grid-template-columns:216px minmax(0,1fr);gap:56px;padding-right:40px}
+}
+
+/* ---------------------------------------------------------------- masthead */
+.masthead{grid-column:1/-1;border-bottom:2px solid var(--ink);
+  padding:56px 0 22px;margin-bottom:40px}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+.masthead h1{font-family:var(--sans);font-weight:700;font-size:clamp(34px,5.2vw,54px);
+  line-height:1.02;letter-spacing:-.022em;margin:0;text-wrap:balance;max-width:16ch}
+.masthead .standfirst{font-size:18.5px;color:var(--ink-soft);max-width:62ch;
+  margin:18px 0 0}
+.stamp{display:flex;flex-wrap:wrap;gap:6px 26px;margin-top:26px;
+  font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.stamp b{color:var(--ink);font-weight:500}
+
+/* --------------------------------------------------------------------- toc */
+nav.toc{display:none}
+@media (min-width:1040px){
+  nav.toc{display:block;position:sticky;top:0;align-self:start;
+    padding-top:8px;max-height:100vh;overflow-y:auto}
+  nav.toc ol{list-style:none;margin:0;padding:0;
+    display:flex;flex-direction:column;gap:2px}
+  nav.toc a{display:block;padding:5px 0 5px 12px;border-left:2px solid var(--rule-soft);
+    font-family:var(--sans);font-size:12.5px;font-weight:500;line-height:1.3;
+    color:var(--muted);text-decoration:none}
+  nav.toc a:hover{color:var(--ink);border-left-color:var(--accent)}
+  nav.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  nav.toc .grp{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--accent);padding:18px 0 4px 12px}
+}
+
+/* ------------------------------------------------------------------ column */
+main{min-width:0}
+section{scroll-margin-top:20px;margin-bottom:60px}
+h2{font-family:var(--sans);font-weight:700;font-size:27px;letter-spacing:-.015em;
+  line-height:1.15;margin:0 0 6px;text-wrap:balance}
+h2 .num{font-family:var(--mono);font-size:13px;font-weight:400;color:var(--accent);
+  display:block;margin-bottom:9px;letter-spacing:.1em}
+h3{font-family:var(--sans);font-weight:600;font-size:17px;letter-spacing:-.008em;
+  margin:34px 0 8px}
+p{margin:0 0 15px;max-width:68ch}
+.lede{font-size:17.5px;color:var(--ink-soft);max-width:66ch;margin-bottom:22px}
+a{color:var(--primary)}
+code,.k{font-family:var(--mono);font-size:.855em;
+  background:var(--primary-wash);padding:1px 5px;border-radius:3px;
+  color:var(--ink);white-space:nowrap}
+ul,ol{max-width:68ch;padding-left:20px;margin:0 0 15px}
+li{margin-bottom:7px}
+strong{font-weight:600}
+
+/* ----------------------------------------------------------------- figures */
+figure{margin:26px 0 30px;background:var(--surface);border:1px solid var(--rule);
+  border-radius:2px;padding:22px 22px 16px;overflow-x:auto}
+figure svg{display:block;width:100%;max-width:100%;height:auto;color:var(--ink)}
+figcaption{font-family:var(--sans);font-size:12.5px;line-height:1.45;
+  color:var(--muted);margin-top:16px;padding-top:12px;
+  border-top:1px solid var(--rule-soft);max-width:74ch}
+figcaption b{color:var(--ink-soft);font-weight:600}
+
+/* ------------------------------------------------------------------ tables */
+.tbl{overflow-x:auto;margin:20px 0 26px;border:1px solid var(--rule);border-radius:2px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;
+  font-family:var(--sans);background:var(--surface)}
+th{text-align:left;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);font-weight:400;
+  padding:11px 14px;border-bottom:1px solid var(--rule);white-space:nowrap;
+  background:var(--raise)}
+td{padding:10px 14px;border-bottom:1px solid var(--rule-soft);
+  vertical-align:top;line-height:1.45;color:var(--ink-soft)}
+tr:last-child td{border-bottom:none}
+td:first-child{color:var(--ink)}
+td.m,th.m{font-family:var(--mono);font-size:12px;white-space:nowrap;color:var(--ink)}
+td.verb{font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+  font-weight:500;white-space:nowrap}
+.v-get{color:var(--ok)} .v-post{color:var(--accent)}
+.v-patch{color:var(--primary)} .v-del{color:var(--bad)}
+tbody.grp-head td{background:var(--raise);font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--accent);
+  border-bottom:1px solid var(--rule)}
+
+/* ------------------------------------------------------------------- rules */
+.rule-list{list-style:none;padding:0;margin:22px 0;max-width:none;
+  display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.rule-list li{margin:0;background:var(--surface);padding:16px 18px;
+  display:grid;grid-template-columns:34px minmax(0,1fr);gap:14px;align-items:start}
+.rule-list .id{font-family:var(--mono);font-size:11.5px;color:var(--accent);
+  padding-top:3px}
+.rule-list h4{font-family:var(--sans);font-size:14.5px;font-weight:600;
+  margin:0 0 4px;color:var(--ink);line-height:1.3}
+.rule-list p{margin:0;font-size:14.5px;line-height:1.5;color:var(--ink-soft);
+  max-width:72ch}
+
+/* ------------------------------------------------------------------- notes */
+.flag{border-left:3px solid var(--accent);background:var(--accent-wash);
+  padding:14px 18px;margin:22px 0;border-radius:0 2px 2px 0}
+.flag p{margin:0;font-size:15px;color:var(--ink);max-width:66ch}
+.flag .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--accent);display:block;margin-bottom:5px}
+.flag.danger{border-left-color:var(--bad);background:var(--bad-wash)}
+.flag.danger .tag{color:var(--bad)}
+
+/* ------------------------------------------------------------------ glance */
+.glance{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin:22px 0}
+.glance div{background:var(--surface);padding:15px 17px}
+.glance dt{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.glance dd{margin:0;font-family:var(--sans);font-size:14.5px;font-weight:500;
+  line-height:1.35;color:var(--ink)}
+.glance dd span{display:block;font-weight:400;font-size:12.5px;color:var(--muted);
+  margin-top:3px}
+
+/* -------------------------------------------------------------------- next */
+.next{border-top:2px solid var(--ink);padding-top:26px;margin-top:70px}
+.next ol{max-width:70ch;padding-left:22px}
+.next li{margin-bottom:11px}
+.next li b{font-weight:600;color:var(--ink)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">inv-planner &middot; orientation for developers and analysts</p>
+  <h1>Inventory Planner Field Guide</h1>
+  <p class="standfirst">A refinery planning workbook rebuilt as an application: a
+  source&nbsp;&rarr;&nbsp;staging&nbsp;&rarr;&nbsp;scenario data layer, a pure simulation
+  engine that reproduces the workbook&rsquo;s daily tank balance, and an optimizer that
+  proposes charge schedules and has its answers refereed before anyone sees them.</p>
+  <div class="stamp">
+    <span>Covers <b>inv-planner/</b> on branch <b>optimizer-v2-and-input-wiring</b></span>
+    <span>Python <b>3.9+</b> &middot; FastAPI &middot; SQLAlchemy &middot; SQLite</span>
+    <span>Front end: <b>no build step</b></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li class="grp">Orientation</li>
+    <li><a href="#what">What the application is</a></li>
+    <li><a href="#arch">Architecture at a glance</a></li>
+    <li class="grp">Data</li>
+    <li><a href="#pipeline">The data pipeline</a></li>
+    <li><a href="#model">Data model</a></li>
+    <li class="grp">Domain</li>
+    <li><a href="#plant">The plant being planned</a></li>
+    <li><a href="#balance">The daily balance</a></li>
+    <li><a href="#rules">Business rules</a></li>
+    <li class="grp">Surfaces</li>
+    <li><a href="#ui">UI flow</a></li>
+    <li><a href="#runs">Optimizer run lifecycle</a></li>
+    <li><a href="#api">Endpoint reference</a></li>
+    <li class="grp">Then what</li>
+    <li><a href="#next">Where the detail goes next</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ================================================================= WHAT -->
+<section id="what">
+  <h2><span class="num">01</span>What the application is</h2>
+  <p class="lede">A planner at a lubricants refinery decides, for every day of the
+  next several weeks, how many barrels of each feed to charge to each process unit.
+  Those charges produce material, customers draw it down, and every product has a
+  tank that can overflow or run dry. The workbook this replaces did that arithmetic
+  in Excel; the application does it in a deterministic engine and then lets a solver
+  search for a better schedule.</p>
+
+  <p>Two sides sit on the same facts, and the UI keeps them apart on purpose. The
+  <strong>planning</strong> side is the workbook: type a charge rate, see the
+  projection move. The <strong>optimizer</strong> side needs inputs a person working
+  by hand never touches &mdash; lost-sale margin, netbacks, switch costs, solver
+  settings &mdash; so it gets its own mode rather than putting prices in front of
+  someone who only wants to move a charge.</p>
+
+  <div class="glance">
+    <div><dt>Unit of decision</dt><dd>barrels per day<span>one cell per line, per day</span></dd></div>
+    <div><dt>Unit of inventory</dt><dd>gallons<span>42 gal/bbl; the crude sheet stays in bbl</span></dd></div>
+    <div><dt>Planning horizon</dt><dd>366 days stored<span>42 days solved by default</span></dd></div>
+    <div><dt>Products tracked</dt><dd>~1,445<span>across 54 balance blocks</span></dd></div>
+  </div>
+
+  <p>Three artefacts carry the state a user cares about, and every screen is a view
+  onto one of them: the <strong>feeds</strong> (what the world says is true today),
+  a <strong>Current Plan</strong> (a frozen copy of the feeds plus a charge schedule),
+  and an <strong>Optimized Result</strong> (a Current Plan the solver rewrote). An
+  Optimized Result is itself a scenario, so it opens on the planning side exactly
+  like one a person made.</p>
+</section>
+
+<!-- ================================================================= ARCH -->
+<section id="arch">
+  <h2><span class="num">02</span>Architecture at a glance</h2>
+  <p class="lede">Four layers, no infrastructure. No Node, no database server, no
+  network calls at runtime &mdash; the whole thing runs from one Python process and a
+  SQLite file.</p>
+
+  <figure>
+    <svg viewBox="0 0 880 418" role="img" aria-label="Four-layer architecture: browser calls FastAPI, which calls a service layer, which sits on SQLite, the pure simulation engine, and the optimizer package.">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="Archivo, sans-serif" fill="currentColor">
+
+        <rect x="190" y="16" width="500" height="56" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="440" y="40" text-anchor="middle" font-size="14" font-weight="600">Browser</text>
+        <text x="440" y="59" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">index.html &#183; app.js &#183; styles.css</text>
+
+        <line x1="440" y1="72" x2="440" y2="104" stroke="currentColor" stroke-width="1.5" marker-end="url(#a1)"/>
+        <text x="452" y="93" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">fetch /api/&#8230; &#8594; JSON</text>
+
+        <rect x="190" y="110" width="500" height="56" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="440" y="134" text-anchor="middle" font-size="14" font-weight="600">HTTP layer &#8212; FastAPI</text>
+        <text x="440" y="153" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">api/main.py &#183; 39 routes &#183; static mount at /</text>
+
+        <line x1="440" y1="166" x2="440" y2="196" stroke="currentColor" stroke-width="1.5" marker-end="url(#a1)"/>
+
+        <rect x="60" y="202" width="760" height="60" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="440" y="226" text-anchor="middle" font-size="14" font-weight="600">Service layer &#8212; all transactions and audit events</text>
+        <text x="440" y="245" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">db/service.py &#183; db/optimizer_service.py &#183; db/reference_edit.py</text>
+
+        <line x1="160" y1="262" x2="160" y2="300" stroke="currentColor" stroke-width="1.5" marker-end="url(#a1)"/>
+        <line x1="440" y1="262" x2="440" y2="300" stroke="currentColor" stroke-width="1.5" marker-end="url(#a1)"/>
+        <line x1="720" y1="262" x2="720" y2="300" stroke="currentColor" stroke-width="1.5" marker-end="url(#a1)"/>
+
+        <rect x="45" y="306" width="230" height="86" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="160" y="332" text-anchor="middle" font-size="13.5" font-weight="600">Store</text>
+        <text x="160" y="352" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">SQLite &#183; SQLAlchemy</text>
+        <text x="160" y="370" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">data/invplanner.db</text>
+        <text x="160" y="386" text-anchor="middle" font-size="11" opacity=".55" font-family="IBM Plex Mono, monospace">12 tables</text>
+
+        <rect x="325" y="306" width="230" height="86" fill="none" stroke="#a96a0c" stroke-width="2.5"/>
+        <text x="440" y="332" text-anchor="middle" font-size="13.5" font-weight="600" fill="#a96a0c">Engine</text>
+        <text x="440" y="352" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">engine.py &#8212; pure, no I/O</text>
+        <text x="440" y="370" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">schedule &#8594; daily balance</text>
+        <text x="440" y="386" text-anchor="middle" font-size="11" opacity=".55" font-family="IBM Plex Mono, monospace">deterministic</text>
+
+        <rect x="605" y="306" width="230" height="86" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="720" y="332" text-anchor="middle" font-size="13.5" font-weight="600">Optimizer</text>
+        <text x="720" y="352" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">optimizer/ v0 v1 v2 greedy</text>
+        <text x="720" y="370" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">PuLP MIP &#183; rule-based</text>
+        <text x="720" y="386" text-anchor="middle" font-size="11" opacity=".55" font-family="IBM Plex Mono, monospace">+ verify.py referee</text>
+      </g>
+    </svg>
+    <figcaption><b>The engine is the load-bearing piece.</b> It takes a reference
+    dataset and a scenario and returns the full projection, with no database, no
+    Excel and no solver in the way. That is what lets it serve the web app&rsquo;s
+    what-if calculations, back the parity harness against the original workbook,
+    <em>and</em> referee the optimizer&rsquo;s own answers.</figcaption>
+  </figure>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Module</th><th>Lines</th><th>Job</th></tr></thead>
+      <tbody>
+        <tr><td class="m">api/main.py</td><td class="m">1,041</td><td>Every HTTP route. Thin &mdash; shapes responses, delegates the work.</td></tr>
+        <tr><td class="m">db/models.py</td><td class="m">587</td><td>The 12 tables, plus the <code>Feed</code> and <code>RefKind</code> registries that drive UI labels.</td></tr>
+        <tr><td class="m">db/service.py</td><td class="m">687</td><td>Feed sync, staging overrides, scenario creation, schedule fill, downtime, simulation cache.</td></tr>
+        <tr><td class="m">db/optimizer_service.py</td><td class="m">749</td><td>Optimizer inputs, the run loop, result scenarios, deletion cascades.</td></tr>
+        <tr><td class="m">engine.py</td><td class="m">615</td><td>Charges &rarr; production &rarr; daily balance. The workbook&rsquo;s arithmetic.</td></tr>
+        <tr><td class="m">model_config.py</td><td class="m">1,456</td><td>Plant facts: which units decide, rate bands, changeover arcs, turnarounds, horizon limits.</td></tr>
+        <tr><td class="m">optimizer/v0&ndash;v2, greedy</td><td class="m">2,900</td><td>Four schedulers, selectable per run.</td></tr>
+        <tr><td class="m">web/app.js</td><td class="m">2,379</td><td>The entire front end. Dependency-free, hand-rolled charts and tables.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================= PIPELINE -->
+<section id="pipeline">
+  <h2><span class="num">03</span>The data pipeline</h2>
+  <p class="lede">This is the spine. Data moves through four stages, each of which
+  exists to answer one question a planner will eventually ask: <em>what did the
+  source say, what did I change, what was true when I made this plan, and what does
+  that imply?</em></p>
+
+  <figure>
+    <svg viewBox="0 0 900 432" role="img" aria-label="Data pipeline: source files flow through raw batches into staging cells, are frozen into a scenario, simulated by the engine into planning views, with the optimizer reading the scenario and writing a new one back.">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="a2o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#a96a0c"/>
+        </marker>
+      </defs>
+      <g font-family="Archivo, sans-serif" fill="currentColor">
+
+        <!-- stage 1 -->
+        <rect x="14" y="46" width="186" height="88" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="24" y="36" font-size="10.5" font-family="IBM Plex Mono, monospace" opacity=".6">STAGE 1</text>
+        <text x="107" y="72" text-anchor="middle" font-size="13.5" font-weight="600">Source files</text>
+        <text x="107" y="92" text-anchor="middle" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">inventory.xlsx</text>
+        <text x="107" y="108" text-anchor="middle" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">open orders.xlsx</text>
+        <text x="107" y="124" text-anchor="middle" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">forecast.xlsx</text>
+
+        <line x1="200" y1="90" x2="242" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+        <text x="221" y="80" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" opacity=".62">parse</text>
+
+        <!-- stage 2 -->
+        <rect x="244" y="46" width="186" height="88" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="254" y="36" font-size="10.5" font-family="IBM Plex Mono, monospace" opacity=".6">STAGE 2</text>
+        <text x="337" y="72" text-anchor="middle" font-size="13.5" font-weight="600">Raw batches</text>
+        <text x="337" y="92" text-anchor="middle" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">raw_batch + raw_row</text>
+        <text x="337" y="112" text-anchor="middle" font-size="11" opacity=".62">immutable &#183; every pull kept</text>
+
+        <line x1="430" y1="90" x2="472" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+        <text x="451" y="80" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" opacity=".62">merge</text>
+
+        <!-- stage 3 -->
+        <rect x="474" y="46" width="186" height="88" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="484" y="36" font-size="10.5" font-family="IBM Plex Mono, monospace" opacity=".6">STAGE 3</text>
+        <text x="567" y="72" text-anchor="middle" font-size="13.5" font-weight="600">Staging cells</text>
+        <text x="567" y="92" text-anchor="middle" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">source + override</text>
+        <text x="567" y="112" text-anchor="middle" font-size="11" opacity=".62">= effective value</text>
+
+        <line x1="660" y1="90" x2="702" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+        <text x="681" y="80" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" opacity=".62">freeze</text>
+
+        <!-- stage 4 -->
+        <rect x="704" y="46" width="182" height="88" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="714" y="36" font-size="10.5" font-family="IBM Plex Mono, monospace" opacity=".6">STAGE 4</text>
+        <text x="795" y="72" text-anchor="middle" font-size="13.5" font-weight="600">Scenario</text>
+        <text x="795" y="92" text-anchor="middle" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">inputs JSON</text>
+        <text x="795" y="112" text-anchor="middle" font-size="11" opacity=".62">+ charge schedule</text>
+
+        <!-- scenario down and left into the engine -->
+        <path d="M795 134 L795 166 L330 166 L330 198" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+        <text x="560" y="158" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" opacity=".62">schedule + frozen inputs + reference version</text>
+
+        <!-- engine -->
+        <rect x="14" y="204" width="632" height="64" fill="none" stroke="#a96a0c" stroke-width="2.5"/>
+        <text x="330" y="230" text-anchor="middle" font-size="13.5" font-weight="600" fill="#a96a0c">engine.simulate()</text>
+        <text x="330" y="251" text-anchor="middle" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">charges &#215; yields &#8594; production &#8594; daily balance per block</text>
+
+        <!-- engine to optimizer -->
+        <line x1="646" y1="236" x2="702" y2="236" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+        <text x="674" y="226" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" opacity=".62">scores</text>
+
+        <rect x="704" y="204" width="182" height="64" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="795" y="230" text-anchor="middle" font-size="13.5" font-weight="600">Optimizer</text>
+        <text x="795" y="251" text-anchor="middle" font-size="11" opacity=".72" font-family="IBM Plex Mono, monospace">v0 &#183; v1 &#183; v2 &#183; greedy</text>
+
+        <!-- optimizer writes back a new scenario -->
+        <path d="M886 220 L900 220" fill="none" stroke="none"/>
+        <path d="M868 204 L868 190 L898 190 L898 26 L795 26 L795 44" fill="none" stroke="#a96a0c" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a2o)"/>
+        <text x="795" y="18" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#a96a0c">writes its answer back as a new scenario</text>
+
+        <!-- engine down to views -->
+        <line x1="330" y1="268" x2="330" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#a2)"/>
+
+        <rect x="14" y="312" width="632" height="82" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="330" y="336" text-anchor="middle" font-size="13.5" font-weight="600">Planning views</text>
+        <text x="330" y="358" text-anchor="middle" font-size="11.5" opacity=".72">Capacity &amp; alerts &#183; Dashboards &#183; Stream sheet &#183; Inventory projection</text>
+        <text x="330" y="380" text-anchor="middle" font-size="11" opacity=".55" font-family="IBM Plex Mono, monospace">computed on request, cached per (scenario, schedule_version, overrides_version)</text>
+      </g>
+    </svg>
+    <figcaption><b>Stage 3 is where planner judgement lives, and it is the reason
+    the stages are separate.</b> Syncing a feed moves only <code>source_value</code>;
+    an override the planner typed is never touched. Where the source has since moved
+    under an override, the cell is flagged <em>stale</em> rather than silently
+    resolved in either direction.</figcaption>
+  </figure>
+
+  <h3>What feeds a scenario, and from where</h3>
+  <p>Six feeds, three upload slots. Uploads are per-slot, not all-or-nothing: dropping
+  in an open-orders extract leaves inventory and the forecast reading from the
+  workbook seed until their own files arrive.</p>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Feed</th><th>Keys</th><th>Unit</th><th>Comes from</th></tr></thead>
+      <tbody>
+        <tr><td class="m">inventory</td><td>Product, Tank</td><td class="m">gal</td><td>Upload slot <code>inventory</code>, else workbook seed</td></tr>
+        <tr><td class="m">open_orders</td><td>Product, Date</td><td class="m">gal</td><td>Upload slot <code>open_orders</code>, else workbook seed</td></tr>
+        <tr><td class="m">sales_forecast</td><td>Product, Month</td><td class="m">gal/day</td><td>Upload slot <code>forecast</code>, else workbook seed</td></tr>
+        <tr><td class="m">blend_component_demand</td><td>Component, Month</td><td class="m">gal/day</td><td>Same <code>forecast</code> file &mdash; one sheet, two feeds</td></tr>
+        <tr><td class="m">base_oil_transfer</td><td>Product, Month</td><td class="m">gal/day</td><td>Workbook seed</td></tr>
+        <tr><td class="m">blend_bom</td><td>Blend, Component</td><td class="m">fraction</td><td>The reference document, not an upload</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Reference data &mdash; products, tank capacities, yields, maximum rates, control
+  limits &mdash; travels separately. It is one versioned JSON document
+  (<code>reference_version.payload</code>) because it changes rarely and always moves
+  as a set. Planner edits to it land in <code>reference_override</code> and bump
+  <code>overrides_version</code>, which is part of the simulation cache key, so
+  editing a yield invalidates every projection built on it.</p>
+</section>
+
+<!-- ================================================================ MODEL -->
+<section id="model">
+  <h2><span class="num">04</span>Data model</h2>
+  <p class="lede">Twelve tables in four groups. The shape to hold onto: reference and
+  staging are <em>current</em>, a scenario is a <em>frozen copy</em>, and an optimizer
+  run is a link between two scenarios.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 470" role="img" aria-label="Entity relationship diagram grouping reference, feed, scenario and optimizer tables with their foreign keys.">
+      <defs>
+        <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="IBM Plex Mono, monospace" fill="currentColor">
+
+        <!-- group labels -->
+        <text x="14" y="20" font-size="10.5" fill="#a96a0c" letter-spacing="1.4">REFERENCE</text>
+        <text x="320" y="20" font-size="10.5" fill="#a96a0c" letter-spacing="1.4">FEEDS &amp; STAGING</text>
+        <text x="14" y="212" font-size="10.5" fill="#a96a0c" letter-spacing="1.4">SCENARIO</text>
+        <text x="620" y="212" font-size="10.5" fill="#a96a0c" letter-spacing="1.4">OPTIMIZER</text>
+
+        <!-- reference -->
+        <rect x="14" y="32" width="250" height="52" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="26" y="52" font-size="12.5" font-weight="500">reference_version</text>
+        <text x="26" y="70" font-size="10.5" opacity=".62">payload JSON &#183; is_active &#183; overrides_version</text>
+
+        <rect x="14" y="104" width="250" height="52" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="26" y="124" font-size="12.5" font-weight="500">reference_override</text>
+        <text x="26" y="142" font-size="10.5" opacity=".62">kind &#183; k1 &#183; k2 &#183; source / override</text>
+
+        <line x1="139" y1="104" x2="139" y2="86" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+
+        <!-- feeds -->
+        <rect x="320" y="32" width="248" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="332" y="51" font-size="12.5" font-weight="500">raw_batch</text>
+        <text x="332" y="68" font-size="10.5" opacity=".62">feed &#183; source &#183; fetched_at &#183; row_count</text>
+
+        <rect x="320" y="98" width="248" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="332" y="117" font-size="12.5" font-weight="500">raw_row</text>
+        <text x="332" y="134" font-size="10.5" opacity=".62">k1 &#183; k2 &#183; k3 &#183; value</text>
+
+        <rect x="620" y="62" width="266" height="60" fill="none" stroke="#a96a0c" stroke-width="2.5"/>
+        <text x="632" y="82" font-size="12.5" font-weight="500" fill="#a96a0c">staging_cell</text>
+        <text x="632" y="99" font-size="10.5" opacity=".72">source_value &#183; override_value</text>
+        <text x="632" y="115" font-size="10.5" opacity=".72">source_at_override &#8594; stale flag</text>
+
+        <line x1="444" y1="98" x2="444" y2="80" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+        <line x1="568" y1="60" x2="618" y2="80" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+        <line x1="568" y1="118" x2="618" y2="102" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+
+        <!-- scenario -->
+        <rect x="14" y="224" width="290" height="72" fill="none" stroke="#a96a0c" stroke-width="2.5"/>
+        <text x="26" y="245" font-size="13" font-weight="500" fill="#a96a0c">scenario</text>
+        <text x="26" y="263" font-size="10.5" opacity=".72">as_of &#183; horizon_days &#183; status &#183; schedule_version</text>
+        <text x="26" y="280" font-size="10.5" opacity=".72">inputs JSON &#8212; the frozen feed snapshot</text>
+
+        <line x1="304" y1="150" x2="304" y2="190" stroke="none"/>
+        <path d="M700 122 L700 176 L160 176 L160 222" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#a3)"/>
+        <text x="430" y="169" font-size="10" opacity=".62" text-anchor="middle">copied at creation, never re-read</text>
+
+        <path d="M139 156 L139 190 L60 190 L60 222" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+
+        <rect x="14" y="322" width="180" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="26" y="340" font-size="12" font-weight="500">schedule_entry</text>
+        <text x="26" y="356" font-size="10.5" opacity=".62">line_key &#183; date &#183; bbl</text>
+
+        <rect x="214" y="322" width="160" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="226" y="340" font-size="12" font-weight="500">crude_day</text>
+        <text x="226" y="356" font-size="10.5" opacity=".62">date &#183; bbl &#183; mode R/L</text>
+
+        <rect x="394" y="322" width="186" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="406" y="340" font-size="12" font-weight="500">planned_downtime</text>
+        <text x="406" y="356" font-size="10.5" opacity=".62">unit &#183; start &#183; end &#183; status</text>
+
+        <line x1="104" y1="320" x2="104" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+        <line x1="294" y1="320" x2="200" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+        <line x1="487" y1="320" x2="280" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+
+        <!-- optimizer -->
+        <rect x="620" y="224" width="266" height="52" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="632" y="244" font-size="12.5" font-weight="500">optimizer_params</text>
+        <text x="632" y="261" font-size="10.5" opacity=".62">one active row &#183; global, not per scenario</text>
+
+        <rect x="620" y="300" width="266" height="66" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="632" y="320" font-size="12.5" font-weight="500">optimizer_run</text>
+        <text x="632" y="337" font-size="10.5" opacity=".62">params snapshot &#183; status &#183; solver &#183; kpis</text>
+        <text x="632" y="353" font-size="10.5" opacity=".62">base_scenario_id &#8594; result_scenario_id</text>
+
+        <line x1="753" y1="298" x2="753" y2="278" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+        <path d="M618 330 L520 330 L520 298" fill="none" stroke="none"/>
+        <path d="M618 316 L310 260" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+        <text x="464" y="282" font-size="10" opacity=".62" text-anchor="middle">base + result, both scenarios</text>
+
+        <!-- audit -->
+        <rect x="14" y="404" width="872" height="46" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="26" y="424" font-size="12.5" font-weight="500">audit_event</text>
+        <text x="26" y="440" font-size="10.5" opacity=".62">actor &#183; action &#183; target &#183; detail &#8212; written by every mutating service call, referenced by nothing</text>
+      </g>
+    </svg>
+    <figcaption><b>The dashed arrow is the one to understand.</b> Staging is copied
+    into <code>scenario.inputs</code> once, at creation, and never re-read. Syncing a
+    feed afterwards changes nothing about an existing plan &mdash; which is the point,
+    and also why a plan created with the wrong date cannot be repaired in place.</figcaption>
+  </figure>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Table</th><th>Grain</th><th>What it is for</th></tr></thead>
+      <tbody>
+        <tr><td class="m">reference_version</td><td>one document</td><td>Master data as one versioned JSON payload: products, blocks, capacities, yields, rates.</td></tr>
+        <tr><td class="m">reference_override</td><td>version &times; kind &times; k1 &times; k2</td><td>A planner edit to one reference value, held against the value the workbook imported.</td></tr>
+        <tr><td class="m">raw_batch</td><td>one feed pull</td><td>Provenance: which file, when, how many rows, what changed.</td></tr>
+        <tr><td class="m">raw_row</td><td>row within a batch</td><td>Immutable landing zone. Never read by the engine; kept so any number can be traced.</td></tr>
+        <tr><td class="m">staging_cell</td><td>feed &times; k1 &times; k2 &times; k3</td><td>Current value per key, carrying both what the source says and what the planner overrode.</td></tr>
+        <tr><td class="m">scenario</td><td>one plan</td><td>A Current Plan or an Optimized Result. Holds <code>as_of</code>, the horizon, and the frozen inputs.</td></tr>
+        <tr><td class="m">schedule_entry</td><td>scenario &times; line &times; day</td><td>One charge cell: barrels per day on one charge line.</td></tr>
+        <tr><td class="m">crude_day</td><td>scenario &times; day</td><td>Crude rate and R/L mode. Separate because the crude unit is an input, not a decision.</td></tr>
+        <tr><td class="m">planned_downtime</td><td>scenario &times; unit &times; window</td><td>Turnarounds and outages. <code>status</code> distinguishes confirmed from inferred.</td></tr>
+        <tr><td class="m">optimizer_params</td><td>one active row</td><td>Prices, margins, switch costs, model version, horizon, solver limits. Global.</td></tr>
+        <tr><td class="m">optimizer_run</td><td>one solve</td><td>The run card: inputs used, status, solver, seconds, objective, KPIs, verification.</td></tr>
+        <tr><td class="m">audit_event</td><td>one action</td><td>Append-only trail of every mutation, with actor and detail.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================================================================ PLANT -->
+<section id="plant">
+  <h2><span class="num">05</span>The plant being planned</h2>
+  <p class="lede">A BA reading the codebase will meet product codes before product
+  names. This is the vocabulary: crude splits into side streams, five process units
+  convert them, and only four of those units are decisions the optimizer gets to make.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 428" role="img" aria-label="Process flow: the crude unit feeds four decision units and the platformer, which produce base oils, waxes, resins, solvents and fuels.">
+      <defs>
+        <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="Archivo, sans-serif" fill="currentColor">
+
+        <!-- crude -->
+        <rect x="14" y="150" width="150" height="110" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="89" y="182" text-anchor="middle" font-size="13.5" font-weight="600">Crude unit</text>
+        <text x="89" y="204" text-anchor="middle" font-size="11" opacity=".7" font-family="IBM Plex Mono, monospace">~9,500 bbl/d</text>
+        <text x="89" y="226" text-anchor="middle" font-size="10.5" opacity=".62">rate is an input</text>
+        <text x="89" y="243" text-anchor="middle" font-size="10.5" fill="#a96a0c">R/L mode is a decision</text>
+
+        <!-- decision bracket -->
+        <path d="M300 22 L288 22 L288 300 L300 300" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="282" y="165" text-anchor="end" font-size="10.5" fill="#a96a0c" font-family="IBM Plex Mono, monospace" transform="rotate(-90 282 165)">DECISION UNITS</text>
+
+        <!-- units -->
+        <rect x="302" y="22" width="196" height="58" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="400" y="46" text-anchor="middle" font-size="13" font-weight="600">MEK &#8212; dewaxing</text>
+        <text x="400" y="66" text-anchor="middle" font-size="10.5" opacity=".7" font-family="IBM Plex Mono, monospace">9116 &#183; 9117 &#183; 9119 &#183; 4317</text>
+
+        <rect x="302" y="92" width="196" height="58" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="400" y="116" text-anchor="middle" font-size="13" font-weight="600">EXTRACT</text>
+        <text x="400" y="136" text-anchor="middle" font-size="10.5" opacity=".7" font-family="IBM Plex Mono, monospace">9302 &#183; 9303 &#183; 9305 (two modes)</text>
+
+        <rect x="302" y="162" width="196" height="58" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="400" y="186" text-anchor="middle" font-size="13" font-weight="600">ROSE &#8212; de-asphalting</text>
+        <text x="400" y="206" text-anchor="middle" font-size="10.5" opacity=".7" font-family="IBM Plex Mono, monospace">4313 &#183; 4555 recycle</text>
+
+        <rect x="302" y="232" width="196" height="68" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="400" y="256" text-anchor="middle" font-size="13" font-weight="600">HYDRO &#8212; hydrotreater</text>
+        <text x="400" y="276" text-anchor="middle" font-size="10.5" opacity=".7" font-family="IBM Plex Mono, monospace">two reactors, R1 and R2</text>
+        <text x="400" y="292" text-anchor="middle" font-size="10.5" opacity=".62">v2 schedules it in stage two</text>
+
+        <rect x="302" y="322" width="196" height="58" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="400" y="346" text-anchor="middle" font-size="13" font-weight="600">PLATFORMER</text>
+        <text x="400" y="366" text-anchor="middle" font-size="10.5" opacity=".62">cascade &#8212; follows upstream, held at grid levels</text>
+
+        <!-- crude to units -->
+        <path d="M164 180 L232 180 L232 51 L300 51" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <path d="M164 196 L248 196 L248 191 L300 191" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <path d="M164 212 L216 212 L216 266 L300 266" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <path d="M164 228 L200 228 L200 351 L300 351" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <text x="236" y="44" font-size="9.5" opacity=".6" font-family="IBM Plex Mono, monospace">9116/9117/9119</text>
+        <text x="252" y="184" font-size="9.5" opacity=".6" font-family="IBM Plex Mono, monospace">4313</text>
+        <text x="220" y="259" font-size="9.5" opacity=".6" font-family="IBM Plex Mono, monospace">9703/9711/9712</text>
+        <text x="204" y="344" font-size="9.5" opacity=".6" font-family="IBM Plex Mono, monospace">9103</text>
+
+        <!-- internal routes -->
+        <path d="M498 51 L530 51 L530 116 L498 116" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <text x="537" y="86" font-size="9.5" opacity=".62" font-family="IBM Plex Mono, monospace">9302/9303/9305</text>
+        <path d="M498 191 L520 191 L520 240 L560 240 L560 10 L400 10 L400 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#a4)"/>
+        <text x="566" y="126" font-size="9.5" opacity=".62" font-family="IBM Plex Mono, monospace">4317 &#8594; MEK</text>
+
+        <!-- outlets -->
+        <rect x="640" y="22" width="246" height="58" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="763" y="46" text-anchor="middle" font-size="12.5" font-weight="600">Base oils</text>
+        <text x="763" y="65" text-anchor="middle" font-size="10.5" opacity=".62">neutrals, bright stock, finished grades</text>
+
+        <rect x="640" y="92" width="246" height="58" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="763" y="116" text-anchor="middle" font-size="12.5" font-weight="600">Waxes &amp; resins</text>
+        <text x="763" y="135" text-anchor="middle" font-size="10.5" opacity=".62">slack wax, cylinder stock, LR resins</text>
+
+        <rect x="640" y="162" width="246" height="58" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="763" y="186" text-anchor="middle" font-size="12.5" font-weight="600">Solvents</text>
+        <text x="763" y="205" text-anchor="middle" font-size="10.5" opacity=".62">Kensol 48 / 50 / 61, hydrotreated</text>
+
+        <rect x="640" y="232" width="246" height="148" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="763" y="258" text-anchor="middle" font-size="12.5" font-weight="600">Fuels &amp; sinks</text>
+        <text x="763" y="278" text-anchor="middle" font-size="10.5" opacity=".62">diesel pool, platformate, gasoline</text>
+        <text x="763" y="300" text-anchor="middle" font-size="10.5" opacity=".62">#6 oil, CAT feed &#8212; the overflow valves</text>
+        <text x="763" y="330" text-anchor="middle" font-size="10.5" fill="#a96a0c">a downgrade goes here</text>
+        <text x="763" y="348" text-anchor="middle" font-size="10.5" opacity=".62">at a low netback, but it always clears</text>
+
+        <line x1="498" y1="40" x2="638" y2="40" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <line x1="498" y1="130" x2="638" y2="120" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <line x1="498" y1="200" x2="638" y2="190" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <line x1="498" y1="280" x2="638" y2="290" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+        <line x1="498" y1="351" x2="638" y2="330" stroke="currentColor" stroke-width="1.3" marker-end="url(#a4)"/>
+      </g>
+    </svg>
+    <figcaption><b>The bracket is the scope boundary.</b> Crude rate is user input;
+    what the optimizer chooses is which feed runs on MEK, EXTRACT, ROSE and HYDRO
+    each day, at what rate, and the crude unit&rsquo;s R/L mode. MEK, EXTRACT and ROSE
+    run <em>one feed at a time</em> &mdash; that constraint, and the cost of switching
+    between feeds, is most of what makes the problem hard.</figcaption>
+  </figure>
+
+  <p>Two consequences show up everywhere in the code. First, because those three
+  units run one feed at a time, writing a rate onto one of their charge lines has to
+  clear the siblings on the same days &mdash; otherwise the unit is silently scheduled
+  at double rate. Second, because the platformer, the hydrotreater and the transfer
+  lines legitimately carry several lines on one day, the same clearing rule applied
+  there would wipe correct schedules, so it is deliberately not applied.</p>
+</section>
+
+<!-- ============================================================== BALANCE -->
+<section id="balance">
+  <h2><span class="num">06</span>The daily balance</h2>
+  <p class="lede">Every number the application shows &mdash; every alert, every chart,
+  every optimizer objective &mdash; comes out of this one cascade, run once per product
+  per day. It is the workbook&rsquo;s core algorithm and the single most important
+  business rule in the system.</p>
+
+  <figure>
+    <svg viewBox="0 0 880 468" role="img" aria-label="The daily balance: beginning inventory plus production in minus sales, forecast and blends gives net charge available; minus production out, out to diesel and downgrade gives end inventory; physical mode clamps produce lost sales, feed shortfall and required downgrade.">
+      <g font-family="Archivo, sans-serif" fill="currentColor">
+        <!-- ledger column -->
+        <line x1="300" y1="30" x2="300" y2="330" stroke="currentColor" stroke-width="1" opacity=".3"/>
+
+        <text x="14" y="22" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#a96a0c" letter-spacing="1.3">LEDGER &#8212; ONE PRODUCT, ONE DAY</text>
+
+        <text x="290" y="54" text-anchor="end" font-size="13.5" font-weight="600">Begin Inventory</text>
+        <text x="312" y="54" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">yesterday&#8217;s End, or opening inventory on the as-of date</text>
+
+        <text x="272" y="84" text-anchor="end" font-size="15" fill="#26624f">+</text>
+        <text x="290" y="84" text-anchor="end" font-size="13.5" font-weight="600">Production In</text>
+        <text x="312" y="84" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">charges &#215; unit yields, from the schedule</text>
+
+        <text x="272" y="112" text-anchor="end" font-size="15" fill="#94282a">&#8722;</text>
+        <text x="290" y="112" text-anchor="end" font-size="13.5" font-weight="600">Sales</text>
+        <text x="312" y="112" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">open orders on that ship date</text>
+
+        <text x="272" y="140" text-anchor="end" font-size="15" fill="#94282a">&#8722;</text>
+        <text x="290" y="140" text-anchor="end" font-size="13.5" font-weight="600">Forecast</text>
+        <text x="312" y="140" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">monthly rate spread over the days</text>
+
+        <text x="272" y="168" text-anchor="end" font-size="15" fill="#94282a">&#8722;</text>
+        <text x="290" y="168" text-anchor="end" font-size="13.5" font-weight="600">Blends</text>
+        <text x="312" y="168" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">component pull implied by blend plans</text>
+
+        <line x1="120" y1="182" x2="300" y2="182" stroke="currentColor" stroke-width="1.5"/>
+        <text x="290" y="204" text-anchor="end" font-size="13.5" font-weight="700" fill="#a96a0c">Net Charge Available</text>
+        <text x="312" y="204" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">what is left for the units after customers are served</text>
+
+        <text x="272" y="234" text-anchor="end" font-size="15" fill="#94282a">&#8722;</text>
+        <text x="290" y="234" text-anchor="end" font-size="13.5" font-weight="600">Production Out</text>
+        <text x="312" y="234" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">charged away to a downstream unit</text>
+
+        <text x="272" y="262" text-anchor="end" font-size="15" fill="#94282a">&#8722;</text>
+        <text x="290" y="262" text-anchor="end" font-size="13.5" font-weight="600">Out to Diesel</text>
+        <text x="312" y="262" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">routed into the diesel pool</text>
+
+        <text x="272" y="290" text-anchor="end" font-size="15" fill="#94282a">&#8722;</text>
+        <text x="290" y="290" text-anchor="end" font-size="13.5" font-weight="600">Downgrade</text>
+        <text x="312" y="290" font-size="11.5" opacity=".62" font-family="IBM Plex Mono, monospace">sent to a low-value outlet on purpose</text>
+
+        <line x1="120" y1="304" x2="300" y2="304" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="120" y1="307" x2="300" y2="307" stroke="currentColor" stroke-width="1.5"/>
+        <text x="290" y="328" text-anchor="end" font-size="14" font-weight="700">End Inventory</text>
+        <text x="312" y="328" font-size="11.5" opacity=".72" font-family="IBM Plex Mono, monospace">carries into tomorrow&#8217;s Begin</text>
+
+        <!-- physical clamps -->
+        <rect x="14" y="358" width="852" height="98" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="28" y="380" font-size="11" font-family="IBM Plex Mono, monospace" fill="#a96a0c" letter-spacing="1.2">PHYSICAL MODE &#8212; THREE CLAMPS, IN THIS ORDER</text>
+
+        <text x="34" y="408" font-size="12.5" font-weight="600">1 &#183; Demand first</text>
+        <text x="34" y="426" font-size="11" opacity=".68" font-family="IBM Plex Mono, monospace">net &lt; 0 &#8594; the shortfall</text>
+        <text x="34" y="442" font-size="11" opacity=".68" font-family="IBM Plex Mono, monospace">is a Lost Sale; net := 0</text>
+
+        <text x="320" y="408" font-size="12.5" font-weight="600">2 &#183; Then charge</text>
+        <text x="320" y="426" font-size="11" opacity=".68" font-family="IBM Plex Mono, monospace">end &lt; 0 &#8594; Feed Shortfall:</text>
+        <text x="320" y="442" font-size="11" opacity=".68" font-family="IBM Plex Mono, monospace">a unit was fed air; end := 0</text>
+
+        <text x="606" y="408" font-size="12.5" font-weight="600">3 &#183; Then the shell</text>
+        <text x="606" y="426" font-size="11" opacity=".68" font-family="IBM Plex Mono, monospace">end &gt; capacity &#8594; Downgrade</text>
+        <text x="606" y="442" font-size="11" opacity=".68" font-family="IBM Plex Mono, monospace">Required; end := capacity</text>
+
+        <line x1="300" y1="392" x2="300" y2="450" stroke="currentColor" stroke-width="1" opacity=".3"/>
+        <line x1="586" y1="392" x2="586" y2="450" stroke="currentColor" stroke-width="1" opacity=".3"/>
+
+        <line x1="210" y1="332" x2="210" y2="356" stroke="#a96a0c" stroke-width="2"/>
+      </g>
+    </svg>
+    <figcaption><b>The ordering of the three clamps is a business decision, not an
+    implementation detail.</b> A customer order takes priority over feeding the next
+    unit, so the tank is drained for demand first and whatever a unit then cannot get
+    is recorded as Feed Shortfall. Reversing that order would move cost between two
+    line items the optimizer prices very differently.</figcaption>
+  </figure>
+
+  <p>The planning views run the engine in <strong>workbook mode</strong>, which
+  reproduces Excel exactly &mdash; including its first-match <code>VLOOKUP</code>
+  semantics, where a product charged at two units only counts the first line.
+  <code>Simulation.lookup_conflicts</code> lists every product where that differs from
+  summing all matching lines. The optimizer and its referee run in
+  <strong>physical mode</strong>, with the clamps above, because a schedule has to be
+  scored against what the plant can actually do.</p>
+
+  <div class="flag">
+    <span class="tag">Time convention</span>
+    <p>Rows fed by the feeds &mdash; Production In, Sales, Blends, Forecast &mdash; are
+    suppressed on days before the plan&rsquo;s <code>as_of</code> date. Schedule-driven
+    rows are not. That asymmetry is the workbook&rsquo;s and is preserved deliberately;
+    it is the reason a plan dated in the past reads as seven weeks of production
+    against no demand.</p>
+  </div>
+</section>
+
+<!-- ================================================================ RULES -->
+<section id="rules">
+  <h2><span class="num">07</span>Business rules</h2>
+  <p class="lede">The rules below are the ones that surprise people. Each is enforced
+  in code, and most exist because the alternative failed quietly once.</p>
+
+  <ul class="rule-list">
+    <li><span class="id">R1</span><div>
+      <h4>An override outranks the source, and survives every sync</h4>
+      <p>Effective value is <code>override_value</code> if present, else
+      <code>source_value</code>. Syncing a feed moves only the source. If the source
+      moved after the planner typed their override, the cell is flagged
+      <em>stale</em> &mdash; shown, not resolved.</p></div></li>
+
+    <li><span class="id">R2</span><div>
+      <h4>A plan freezes its inputs, and its date cannot be corrected</h4>
+      <p>Creating a Current Plan copies staging into <code>scenario.inputs</code>.
+      There is no endpoint to change a scenario&rsquo;s <code>as_of</code> afterwards.
+      A plan created with the wrong date has to be made again; nothing downstream
+      detects the error.</p></div></li>
+
+    <li><span class="id">R3</span><div>
+      <h4>A new plan takes fresh data but an inherited schedule</h4>
+      <p>Opening inventory and demand come from the current feeds; the charge grid and
+      downtime are copied from whichever plan the form names, lined up by calendar
+      date. Days at either end that fall outside the source plan start blank, and the
+      form says how many.</p></div></li>
+
+    <li><span class="id">R4</span><div>
+      <h4>Demand is served before unit charge</h4>
+      <p>In physical mode the tank covers customer orders first. Unmet demand is a
+      Lost Sale; a unit left without feed is a Feed Shortfall. The optimizer prices
+      those two very differently, so the ordering decides the answer.</p></div></li>
+
+    <li><span class="id">R5</span><div>
+      <h4>Filling a whole unit at a rate is refused; clearing one is not</h4>
+      <p>Most units carry several charge lines. Writing one rate onto all of them runs
+      every line at once, which no plant can execute. <em>Clearing</em> a whole unit is
+      the operation a cold start needs, and is the one allowed.</p></div></li>
+
+    <li><span class="id">R6</span><div>
+      <h4>On one-feed units, a fill clears the siblings</h4>
+      <p>MEK, EXTRACT and ROSE run one feed at a time, so setting a rate on one line
+      clears that unit&rsquo;s other lines on those days. The platformer, the
+      hydrotreater and the transfers carry several lines per day as a matter of
+      course, so theirs are left alone.</p></div></li>
+
+    <li><span class="id">R7</span><div>
+      <h4>Days a unit is down are skipped, never written</h4>
+      <p>The optimizer creates no variable on an outage day, so a charge typed there
+      would survive into results unnoticed. Fills skip those days upstream, and the
+      referee checks for them downstream.</p></div></li>
+
+    <li><span class="id">R8</span><div>
+      <h4>One optimizer run at a time, and not without its prices</h4>
+      <p>A second run while one is solving is refused with a 409 naming the plan the
+      busy run is working on. A run is refused with a 400 if lost-sale margin or
+      either netback is unset &mdash; the objective is meaningless without them.</p></div></li>
+
+    <li><span class="id">R9</span><div>
+      <h4>Both sides of a comparison are scored over the same days</h4>
+      <p>A model clamps its horizon back to the last day the planner filled in a
+      charge. Scoring the baseline over the days <em>asked for</em> while scoring the
+      result over the days actually <em>planned</em> flatters the optimizer by exactly
+      the demand in the gap &mdash; which it did, by 24 percentage points, before this
+      was fixed.</p></div></li>
+
+    <li><span class="id">R10</span><div>
+      <h4>Every accepted solve is replayed through the simulator</h4>
+      <p>The optimizer&rsquo;s KPIs come from its own variables, so they are exactly
+      what not to trust. <code>verify.py</code> re-simulates the proposed schedule as an
+      independent implementation of the same physics. Disagreement marks the run
+      <code>unverified</code>, and an unverified run should not be used.</p></div></li>
+
+    <li><span class="id">R11</span><div>
+      <h4><code>done</code> is a proof, not a compliment</h4>
+      <p><code>done</code> means the solver proved optimality.
+      <code>not_proved_optimal</code> is the normal good outcome on a long horizon, and
+      the only outcome <code>greedy</code> can ever reach &mdash; it does no search, so
+      there is no gap to report.</p></div></li>
+
+    <li><span class="id">R12</span><div>
+      <h4>Deleting a plan takes its results with it</h4>
+      <p>Deleting a Current Plan deletes every Optimized Result made from it and their
+      run cards. Deleting one result leaves results refined from it in place. Both
+      confirm first and name what goes; neither can be undone.</p></div></li>
+  </ul>
+</section>
+
+<!-- =================================================================== UI -->
+<section id="ui">
+  <h2><span class="num">08</span>UI flow</h2>
+  <p class="lede">One page, two modes, nine tabs. The scenario picker in the header is
+  global &mdash; every view reads whichever plan is selected &mdash; and the mode switch
+  decides which tabs exist rather than which are enabled.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 480" role="img" aria-label="UI map: a global header with scenario picker and mode switch, seven planning tabs and two optimizer tabs, with the cross-navigation between them.">
+      <defs>
+        <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="a5o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#a96a0c"/>
+        </marker>
+      </defs>
+      <g font-family="Archivo, sans-serif" fill="currentColor">
+
+        <!-- header -->
+        <rect x="14" y="14" width="872" height="52" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="28" y="38" font-size="12.5" font-weight="600">Header &#8212; always present</text>
+        <text x="28" y="56" font-size="11" opacity=".68" font-family="IBM Plex Mono, monospace">scenario picker &#183; Delete this plan&#8230; &#183; Planning | Optimizer &#183; New Current Plan&#8230;</text>
+
+        <!-- planning column -->
+        <text x="14" y="96" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#a96a0c" letter-spacing="1.3">PLANNING MODE</text>
+        <rect x="14" y="106" width="250" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="28" y="126" font-size="12.5" font-weight="600">Capacity &amp; alerts</text>
+        <text x="28" y="143" font-size="10.5" opacity=".62">opens first &#183; what breaks in 30 days</text>
+
+        <rect x="14" y="160" width="250" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="28" y="180" font-size="12.5" font-weight="600">Dashboards</text>
+        <text x="28" y="197" font-size="10.5" opacity=".62">chart wall, one product family at a time</text>
+
+        <rect x="14" y="214" width="250" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="28" y="234" font-size="12.5" font-weight="600">Stream sheet</text>
+        <text x="28" y="251" font-size="10.5" opacity=".62">the workbook tab, one sheet at a time</text>
+
+        <rect x="14" y="268" width="250" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="28" y="288" font-size="12.5" font-weight="600">Inventory projection</text>
+        <text x="28" y="305" font-size="10.5" opacity=".62">one product, charted against its band</text>
+
+        <rect x="14" y="322" width="250" height="60" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="28" y="342" font-size="12.5" font-weight="600">Charge schedule</text>
+        <text x="28" y="359" font-size="10.5" opacity=".62">the only view that writes the plan:</text>
+        <text x="28" y="375" font-size="10.5" opacity=".62">edit a cell &#183; fill a window &#183; set downtime</text>
+
+        <rect x="14" y="390" width="250" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="28" y="410" font-size="12.5" font-weight="600">Source data</text>
+        <text x="28" y="427" font-size="10.5" opacity=".62">upload files, override cells, sync feeds</text>
+
+        <rect x="14" y="444" width="250" height="30" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="28" y="464" font-size="12.5" font-weight="600">Model inputs <tspan font-size="10.5" font-weight="400" opacity=".62">&#8212; reference edits</tspan></text>
+
+        <!-- optimizer column -->
+        <text x="636" y="96" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#a96a0c" letter-spacing="1.3">OPTIMIZER MODE</text>
+        <rect x="636" y="106" width="250" height="60" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="650" y="126" font-size="12.5" font-weight="600">Optimizer inputs</text>
+        <text x="650" y="143" font-size="10.5" opacity=".62">prices, margins, switch costs, model,</text>
+        <text x="650" y="159" font-size="10.5" opacity=".62">horizon, solver limits &#8212; global, autosaved</text>
+
+        <rect x="636" y="182" width="250" height="72" fill="none" stroke="#a96a0c" stroke-width="2"/>
+        <text x="650" y="202" font-size="12.5" font-weight="600">Runs &amp; results</text>
+        <text x="650" y="219" font-size="10.5" opacity=".62">Run optimizer &#183; run cards with KPIs</text>
+        <text x="650" y="235" font-size="10.5" opacity=".62">Refine with v2 &#183; Open result</text>
+        <text x="650" y="250" font-size="10.5" opacity=".62">Delete result</text>
+
+        <!-- dialogs -->
+        <text x="330" y="300" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#a96a0c" letter-spacing="1.3">DIALOGS</text>
+        <rect x="330" y="310" width="240" height="76" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="344" y="330" font-size="12.5" font-weight="600">New Current Plan</text>
+        <text x="344" y="347" font-size="10.5" opacity=".62">name &#183; plan date &#183; schedule to copy</text>
+        <text x="344" y="363" font-size="10.5" opacity=".62">warns on a date &gt; 1 week old</text>
+        <text x="344" y="379" font-size="10.5" opacity=".62">or in the future</text>
+
+        <rect x="330" y="402" width="240" height="50" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="344" y="422" font-size="12.5" font-weight="600">Confirm deletion</text>
+        <text x="344" y="439" font-size="10.5" opacity=".62">names every plan and run that goes</text>
+
+        <!-- cross links -->
+        <path d="M264 129 L300 129 L300 291 L264 291" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a5)"/>
+        <path d="M264 183 L288 183 L288 285 L264 285" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a5)"/>
+        <text x="306" y="214" font-size="10" opacity=".62" font-family="IBM Plex Mono, monospace">click a row</text>
+        <text x="306" y="228" font-size="10" opacity=".62" font-family="IBM Plex Mono, monospace">or a chart</text>
+
+        <path d="M264 413 L330 390" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a5)"/>
+        <path d="M580 348 L620 348 L620 66" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#a5)"/>
+        <text x="596" y="200" font-size="10" opacity=".62" font-family="IBM Plex Mono, monospace" transform="rotate(-90 596 200)">creates, then selects</text>
+
+        <path d="M660 254 L660 288 L600 288" fill="none" stroke="#a96a0c" stroke-width="2" marker-end="url(#a5o)"/>
+        <path d="M600 288 L310 288 L310 290 L264 290" fill="none" stroke="#a96a0c" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a5o)"/>
+        <text x="470" y="281" font-size="10.5" fill="#a96a0c" font-family="IBM Plex Mono, monospace" text-anchor="middle">Open result &#8594; switches mode, selects the result scenario</text>
+      </g>
+    </svg>
+    <figcaption><b>The two modes meet in one place.</b> An Optimized Result is a
+    scenario, so opening one flips the app back to planning mode with that scenario
+    selected &mdash; and from there it behaves exactly like a plan someone typed. The
+    charge schedule is the only planning view that writes.</figcaption>
+  </figure>
+
+  <h3>Interaction details worth knowing before touching the front end</h3>
+  <ul>
+    <li><strong>Edits save on blur, not on a button.</strong> A charge cell, an
+    override, a reference value and an optimizer input all write when the field loses
+    focus, and the projection re-simulates immediately.</li>
+    <li><strong>The scroll wheel is blurred out of number inputs.</strong> A focused
+    number input takes wheel events as increments; scrolling the page past a cell you
+    just typed in once turned <code>0.30</code> into <code>&minus;36.7</code> and
+    ruined a run with nothing on screen to show it.</li>
+    <li><strong>Filled-but-unapplied panels are reported.</strong> The downtime and
+    fill panels write nothing until Add or Apply. Leaving one dirty &mdash; by closing
+    it, changing tab, or changing plan &mdash; raises a toast with a way back to it.</li>
+    <li><strong>Runs are polled, not pushed.</strong> The solve is synchronous on the
+    server; the front end tracks it with a clock and a poll, and a run left
+    <code>running</code> by a stopped server reads as <code>interrupted</code>.</li>
+  </ul>
+
+  <div class="flag">
+    <span class="tag">Before changing this UI</span>
+    <p>Run the <code>ui-ux-audit</code> skill over any change to
+    <code>web/index.html</code>, <code>app.js</code> or <code>styles.css</code> before
+    calling it done. It checks the four conventions this screen keeps breaking: one
+    concept keeps one name, one job uses one control, a planner can tell what an
+    action will touch, and nothing fails silently.</p>
+  </div>
+</section>
+
+<!-- ================================================================= RUNS -->
+<section id="runs">
+  <h2><span class="num">09</span>Optimizer run lifecycle</h2>
+  <p class="lede">A run is a state machine with a referee in the middle. The important
+  thing to read off it: producing a schedule and being allowed to trust one are two
+  different events.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 396" role="img" aria-label="Optimizer run state machine: running leads to optimal or feasible, which write a result scenario and are verified, giving done, not proved optimal or unverified; other paths give infeasible, error or interrupted.">
+      <defs>
+        <marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="Archivo, sans-serif" fill="currentColor">
+
+        <rect x="14" y="150" width="140" height="56" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="84" y="174" text-anchor="middle" font-size="12.5" font-weight="600">running</text>
+        <text x="84" y="192" text-anchor="middle" font-size="10" opacity=".62" font-family="IBM Plex Mono, monospace">POST /optimizer/run</text>
+
+        <line x1="154" y1="178" x2="204" y2="178" stroke="currentColor" stroke-width="1.4" marker-end="url(#a6)"/>
+        <text x="179" y="168" text-anchor="middle" font-size="9.5" opacity=".6" font-family="IBM Plex Mono, monospace">solve</text>
+
+        <rect x="206" y="150" width="150" height="56" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="281" y="174" text-anchor="middle" font-size="12.5" font-weight="600">optimal | feasible</text>
+        <text x="281" y="192" text-anchor="middle" font-size="10" opacity=".62" font-family="IBM Plex Mono, monospace">a schedule exists</text>
+
+        <line x1="356" y1="178" x2="406" y2="178" stroke="currentColor" stroke-width="1.4" marker-end="url(#a6)"/>
+        <text x="381" y="168" text-anchor="middle" font-size="9.5" opacity=".6" font-family="IBM Plex Mono, monospace">write</text>
+
+        <rect x="408" y="140" width="164" height="76" rx="2" fill="none" stroke="#a96a0c" stroke-width="2.5"/>
+        <text x="490" y="163" text-anchor="middle" font-size="12.5" font-weight="600" fill="#a96a0c">verify.py</text>
+        <text x="490" y="182" text-anchor="middle" font-size="10" opacity=".72" font-family="IBM Plex Mono, monospace">result written as a</text>
+        <text x="490" y="196" text-anchor="middle" font-size="10" opacity=".72" font-family="IBM Plex Mono, monospace">new scenario, then</text>
+        <text x="490" y="210" text-anchor="middle" font-size="10" opacity=".72" font-family="IBM Plex Mono, monospace">re-simulated</text>
+
+        <path d="M572 158 L618 116" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a6)"/>
+        <path d="M572 178 L618 178" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a6)"/>
+        <path d="M572 200 L618 248" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a6)"/>
+
+        <rect x="620" y="86" width="266" height="54" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="634" y="108" font-size="12.5" font-weight="600">done</text>
+        <text x="634" y="127" font-size="10.5" opacity=".62">verified, and optimality was proved</text>
+
+        <rect x="620" y="150" width="266" height="54" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="634" y="172" font-size="12.5" font-weight="600">not_proved_optimal</text>
+        <text x="634" y="191" font-size="10.5" opacity=".62">verified &#183; the normal good outcome</text>
+
+        <rect x="620" y="220" width="266" height="54" rx="2" fill="none" stroke="#94282a" stroke-width="2.5"/>
+        <text x="634" y="242" font-size="12.5" font-weight="600" fill="#94282a">unverified</text>
+        <text x="634" y="261" font-size="10.5" opacity=".7">the referee disagreed &#8212; do not use</text>
+
+        <!-- failure paths -->
+        <path d="M84 206 L84 268" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a6)"/>
+        <rect x="14" y="274" width="140" height="46" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="84" y="294" text-anchor="middle" font-size="12" font-weight="600">infeasible</text>
+        <text x="84" y="311" text-anchor="middle" font-size="10" opacity=".62">no schedule exists</text>
+
+        <path d="M154 296 L204 296" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#a6)"/>
+        <rect x="206" y="274" width="150" height="46" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <text x="281" y="294" text-anchor="middle" font-size="12" font-weight="600">error | interrupted</text>
+        <text x="281" y="311" text-anchor="middle" font-size="10" opacity=".62">exception, or server stopped</text>
+
+        <!-- refine loop -->
+        <path d="M753 274 L753 344 L84 344 L84 208" fill="none" stroke="#a96a0c" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a6)"/>
+        <path d="M753 204 L753 218" fill="none" stroke="none"/>
+        <text x="420" y="337" text-anchor="middle" font-size="10.5" fill="#a96a0c" font-family="IBM Plex Mono, monospace">Refine with v2 &#8212; a verified result becomes the base of the next run</text>
+
+        <text x="14" y="376" font-size="10.5" opacity=".6" font-family="IBM Plex Mono, monospace">Refused before it starts: another run is still solving (409) &#183; lost-sale margin or a netback is unset (400)</text>
+      </g>
+    </svg>
+    <figcaption><b>Two separate claims, kept separate.</b> Verification asks whether
+    the schedule is executable and whether the KPIs are honest; optimality asks whether
+    anything better exists. A run can be verified without being optimal &mdash; and
+    <code>greedy</code> always is, since it does no search at all.</figcaption>
+  </figure>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Model</th><th>Decides</th><th>Typical time, 42 days</th><th>Use it when</th></tr></thead>
+      <tbody>
+        <tr><td class="m">greedy</td><td>MEK, EXTRACT, HYDRO, ROSE</td><td>under a second</td><td>First pass from a cold plan. No optimality gap, ever.</td></tr>
+        <tr><td class="m">v2</td><td>MEK, EXTRACT, HYDRO <span style="opacity:.6">(two-stage)</span></td><td>about a minute</td><td>Refining a verified greedy result.</td></tr>
+        <tr><td class="m">v1</td><td>MEK, EXTRACT</td><td>varies</td><td>Smaller problem; the hydrotreater stays as scheduled.</td></tr>
+        <tr><td class="m">v0</td><td>baseline formulation</td><td>varies</td><td>Reference implementation and regression target.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The working sequence is <code>greedy</code> then <em>Refine with v2</em> from the
+  run card: a schedule in seconds, then a solver improving one that already verifies.
+  On the 2026-09-12 walkthrough that took a plan from 8,863,918 gal of lost sales to
+  947,712 in 2.5 seconds.</p>
+</section>
+
+<!-- ================================================================== API -->
+<section id="api">
+  <h2><span class="num">10</span>Endpoint reference</h2>
+  <p class="lede">39 routes, all under <code>/api</code>, all JSON except one xlsx
+  export. Path parameters are <code>{scenario_id}</code> unless noted. There is no
+  authentication &mdash; <code>actor</code> is a query string the UI fills with
+  <code>planner</code>, and it exists for the audit trail, not for access control.</p>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th style="width:64px">Verb</th><th>Path</th><th>What it does</th></tr></thead>
+      <tbody class="grp-head"><tr><td colspan="3">Health</td></tr></tbody>
+      <tbody>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/health</td><td>Reference version, feed counts, scenario count.</td></tr>
+      </tbody>
+
+      <tbody class="grp-head"><tr><td colspan="3">Feeds, staging and uploads</td></tr></tbody>
+      <tbody>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/feeds</td><td>All six feeds with row counts, override counts and last sync.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/feeds/{feed}/rows</td><td>Staging cells. <code>search</code>, and <code>only</code> to filter to overridden or stale.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/feeds/{feed}/batches</td><td>Sync history for one feed.</td></tr>
+        <tr><td class="verb v-patch">PATCH</td><td class="m">/api/staging/{cell_id}</td><td>Set or clear one override. Records who, when and why.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">/api/feeds/{feed}/sync</td><td>Re-pull one feed. Overrides untouched; changed sources flagged stale.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">/api/feeds/sync-all</td><td>Re-pull every feed.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/feeds/uploads</td><td>Which of the three upload slots are filled, and with what.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">/api/feeds/upload/{kind}</td><td>Upload a sheet. Parsed in full before it replaces anything.</td></tr>
+        <tr><td class="verb v-del">DELETE</td><td class="m">/api/feeds/upload/{kind}</td><td>Clear a slot; that feed falls back to the workbook seed.</td></tr>
+      </tbody>
+
+      <tbody class="grp-head"><tr><td colspan="3">Reference data</td></tr></tbody>
+      <tbody>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/reference</td><td>The six editable kinds, with counts and edit counts.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/reference/{kind}</td><td>Values for one kind, source alongside override.</td></tr>
+        <tr><td class="verb v-patch">PATCH</td><td class="m">/api/reference/{kind}</td><td>Edit or reset one value. Bumps <code>overrides_version</code>.</td></tr>
+      </tbody>
+
+      <tbody class="grp-head"><tr><td colspan="3">Scenarios</td></tr></tbody>
+      <tbody>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/scenarios</td><td>All plans and results, labelled by kind and lineage.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">/api/scenarios</td><td>Create a Current Plan: freeze staging, copy a schedule.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/scenarios/{id}</td><td>One scenario, with its optimizer pairing if it has one.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/scenarios/{id}/deletion</td><td>Preview: exactly what a delete would take.</td></tr>
+        <tr><td class="verb v-del">DELETE</td><td class="m">/api/scenarios/{id}</td><td>Delete it, and everything the preview named.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/scenarios/{id}/products</td><td>Balance blocks in this scenario, for the product picker.</td></tr>
+      </tbody>
+
+      <tbody class="grp-head"><tr><td colspan="3">Projection and views</td></tr></tbody>
+      <tbody>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/projection?block_id=</td><td>One product&rsquo;s full daily balance, with capacity and control band.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/streams</td><td>The stream sheets available in this scenario.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/stream?sheet=</td><td>Every product on one sheet, workbook shape. <code>key_rows</code> collapses it.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/alerts?days=</td><td>Overflow, stockout and control-band breaches, ranked by severity.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/dashboards</td><td>The product families, from <code>groups.py</code>.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/dashboard?group=</td><td>Chart series for every product in one family.</td></tr>
+      </tbody>
+
+      <tbody class="grp-head"><tr><td colspan="3">Charge schedule and downtime</td></tr></tbody>
+      <tbody>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/schedule?days=&amp;offset=</td><td>The charge grid. <code>compare</code> returns a second plan&rsquo;s values per cell.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/schedule.xlsx</td><td>The same grid as a workbook. The only non-JSON route.</td></tr>
+        <tr><td class="verb v-patch">PATCH</td><td class="m">&#8230;/schedule</td><td>One cell: line, date, barrels.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">&#8230;/schedule/fill</td><td>One rate across a window. Enforces R5, R6 and R7.</td></tr>
+        <tr><td class="verb v-patch">PATCH</td><td class="m">&#8230;/crude</td><td>Crude barrels and R/L mode for one day.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">&#8230;/downtime</td><td>Outage windows on this plan.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">&#8230;/downtime</td><td>Add a window: unit, start, end, reason.</td></tr>
+        <tr><td class="verb v-del">DELETE</td><td class="m">&#8230;/downtime/{downtime_id}</td><td>Remove one window.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">&#8230;/downtime/toggle</td><td>Flip a single day down or up.</td></tr>
+      </tbody>
+
+      <tbody class="grp-head"><tr><td colspan="3">Optimizer</td></tr></tbody>
+      <tbody>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/optimizer/params</td><td>The active inputs, with the schema that draws the form.</td></tr>
+        <tr><td class="verb v-patch">PATCH</td><td class="m">/api/optimizer/params</td><td>Change inputs. Global &mdash; they apply to the <em>next</em> run, not past ones.</td></tr>
+        <tr><td class="verb v-get">GET</td><td class="m">/api/optimizer/runs</td><td>Run cards: status, solver, seconds, objective, KPIs, lineage.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">/api/optimizer/run</td><td>Solve one plan. Synchronous. 409 if busy, 400 if prices are missing.</td></tr>
+        <tr><td class="verb v-post">POST</td><td class="m">/api/optimizer/runs/{run_id}/refine</td><td>Run v2 on a verified result, whatever the Model input says.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================================================================= NEXT -->
+<section id="next" class="next">
+  <h2><span class="num">11</span>Where the detail goes next</h2>
+  <p>This guide is the map. Five things sit under it that a developer or BA will need
+  within their first fortnight, and none of them exist yet in this form:</p>
+  <ol>
+    <li><b>An API contract per endpoint</b> &mdash; request and response schemas with a
+    worked example each. FastAPI already publishes <code>/docs</code>; what is missing
+    is the meaning of the fields, not their types.</li>
+    <li><b>A field-level data dictionary</b> &mdash; every column of the twelve tables
+    with its unit, its nullability, who writes it, and what a null means. The units are
+    the trap: gallons, barrels, barrels per day and gallons per day all appear as bare
+    floats.</li>
+    <li><b>A business-rules catalogue keyed to code</b> &mdash; the twelve rules above
+    expanded to every enforced rule, each with the function that enforces it and the
+    test that pins it. That is the document a BA can actually take to operations.</li>
+    <li><b>Screen-by-screen UI specs</b> &mdash; per view: what it reads, what it writes,
+    every control, every error state. The <code>ui-ux-audit</code> skill already encodes
+    the conventions these would be written against.</li>
+    <li><b>A runbook</b> &mdash; first-time setup, the monthly cycle from three uploaded
+    files to a verified plan, and what to do when a run comes back
+    <code>unverified</code>, <code>infeasible</code> or <code>interrupted</code>.</li>
+  </ol>
+  <p>The deep domain material already exists in the repository and should be linked
+  rather than rewritten: <code>BUSINESS-LOGIC.md</code> for the workbook decomposition,
+  <code>PROCESS-FLOW.md</code> for the confirmed plant description,
+  <code>MIP-FORMULATION.md</code> and <code>SCHEDULING-MODEL.md</code> for the
+  optimization model, and <code>MARGIN-AND-CAMPAIGNS.md</code> for how the objective
+  was calibrated.</p>
+</section>
+
+</main>
+</div>
+</body>
+</html>
