@@ -141,6 +141,37 @@ Decided by the user after the plan and optimizer audit
       runs out first (`cfg.clamp_horizon`). Screens say what is *set*, and the
       run card reports what was actually solved.
 
+16. **The screens show the model's products, not the workbook's blocks.** Decided
+    by the user on 2026-09-13 after the diesel dashboard audit
+    (`docs/ui-audits/2026-09-13-dashboard-diesel.md`, F1, F3, F4, F5).
+
+    - An aggregation in `cfg.AGGREGATIONS` is collapsed at `live_blocks()`, so every
+      screen that goes through it agrees: Dashboards, Capacity & alerts, Inventory
+      projection, the Stream sheet and Model inputs. Diesel becomes one charge
+      product (9713) and one finished pool (`DSL`, "Finished diesel").
+    - **A derived pool and its members are never drawn together.** DDDD is the sum
+      of ten grades; showing both counted the same material twice.
+    - **A member that carries no material carries no pill.** Eight diesel grades
+      with no tank, no production and no demand were badged green `in bounds` and
+      counted in "products clear".
+    - The engine still carries every block, because parity stops checking a block
+      the engine doesn't hold (`live_blocks`' own docstring). The simplification
+      belongs a layer up, which is where `modelprep` and `reference_edit` already
+      put it. This applies to any future aggregation, not only diesel.
+
+17. **A product is named from `products[code].name`, never from an imported label.**
+    Decided the same day (F2). The workbook's Inventory Targets sheet has 9713 and
+    DDDD's names swapped, so the LCL and UCL groups called the hydrotreater charge
+    "Finished Diesel" while Tank capacity, two groups up the same screen, called it
+    "NO.2 DIESEL-HYDRO CHARGE". One code must not have two names, and never the
+    other product's. Fix the label source, not the seed file: re-importing the
+    workbook would bring the swap back.
+
+18. **A dashboard section heading is dropped when the group has one section.** (F6)
+    The group tab has already named the family, and the heading underneath was the
+    workbook sheet the blocks were pasted on - "Solvents" under "Diesel & heating
+    oil". Sheet names stay only where a group spans several of them.
+
 ---
 
 ## Open - vocabulary
